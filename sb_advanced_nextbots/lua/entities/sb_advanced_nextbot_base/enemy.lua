@@ -124,7 +124,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:UpdateEnemyMemory
-	Desc: Updates bot memory of this enemy.
+	Desc: Updates bot's memory of this enemy.
 	Arg1: Entity | enemy | Enemy to update.
 	Arg2: Vector | pos | Position where bot see enemy.
 	Ret1: 
@@ -152,7 +152,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:FindEnemies
-	Desc: Find all enemies that can be seen from bot position and updates memory.
+	Desc: Finds all enemies that can be seen from bot position and updates memory.
 	Arg1: 
 	Ret1: 
 --]]------------------------------------
@@ -166,7 +166,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:GetKnownEnemies
-	Desc: Returns all entities that in bots enemy memory.
+	Desc: Returns all entities that in bot's enemy memory.
 	Arg1: 
 	Ret1: table | Enemies table
 --]]------------------------------------
@@ -186,7 +186,7 @@ end
 	Name: NEXTBOT:GetLastEnemyPosition
 	Desc: Returns last updated position of enemy.
 	Arg1: Entity | enemy | Enemy to get position.
-	Ret1: Vector | Last known position. Returns nil if enemy not in bot memory.
+	Ret1: Vector | Last known position. Returns nil if enemy is not in bot memory.
 --]]------------------------------------
 function ENT:GetLastEnemyPosition(enemy)
 	return self.m_EnemiesMemory[enemy] and self.m_EnemiesMemory[enemy].pos
@@ -226,7 +226,7 @@ end
 function ENT:ShouldBeEnemy(ent)
 	if ent:IsPlayer() and GetConVar("ai_ignoreplayers"):GetBool() then return false end
 	if self:GetRelationship(ent)!=D_HT then return false end
-	if !ent.SBAdvancedNextBot and ent:IsNPC() and ent:GetNPCState()==NPC_STATE_DEAD then return false end
+	if !ent.SBAdvancedNextBot and ent:IsNPC() and (ent:GetNPCState()==NPC_STATE_DEAD or ent:GetClass()=="npc_barnacle" and ent:GetInternalVariable("m_takedamage")==0) then return false end
 	if (ent.SBAdvancedNextBot or !ent:IsNPC()) and ent:Health()<=0 then return false end
 	if self:GetRangeTo(ent)>self.MaxSeeEnemyDistance then return false end
 	
