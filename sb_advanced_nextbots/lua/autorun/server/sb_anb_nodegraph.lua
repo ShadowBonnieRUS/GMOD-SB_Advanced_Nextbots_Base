@@ -1027,6 +1027,9 @@ local PathFollower = {
 			
 			self.CurSegmentID = self.CurSegmentID+1
 			self.CurSegment = self.Segments[self.CurSegmentID]
+			
+			goal = self.CurSegment
+			goalpos = goal.pos
 		end
 		
 		if goal.type==PATH_SEGMENT_MOVETYPE_GROUND then
@@ -1037,7 +1040,6 @@ local PathFollower = {
 			forward:Normalize()
 			
 			local left = Vector(-forward.y,forward.x,0)
-			
 			local nearRange = 50
 			
 			if range>nearRange then
@@ -1047,7 +1049,39 @@ local PathFollower = {
 			bot.loco:Approach(goalpos,1)
 		elseif goal.type==PATH_SEGMENT_MOVETYPE_JUMPING then
 			if bot.loco:IsOnGround() then
-				bot:JumpToPos(goalpos)
+				local pos = bot:GetPos()
+				local dir = goalpos-pos
+				dir.z = 0
+				dir:Normalize()
+				
+				local b1,b2 = bot:GetCollisionBounds()
+				b1.z = b1.z+bot.loco:GetStepHeight()
+				
+				local filter = bot:GetChildren()
+				filter[#filter+1] = bot
+				
+				local range = math.Distance(pos.x,pos.y,goalpos.x,goalpos.y)/2
+				local topos = pos+dir*range+Vector(0,0,math.max(0,goalpos.z-pos.z+bot.JumpHeight))
+				
+				local result = util.TraceHull({
+					start = pos,
+					endpos = topos,
+					mins = b1,
+					maxs = b2,
+					mask = bot:GetSolidMask(),
+					filter = filter,
+				})
+				
+				if sb_anb_nodegraph_pathdebug:GetBool() then
+					debugoverlay.SweptBox(pos,topos,b1,b2,angle_zero,0.1,result.Hit and Color(255,0,0) or Color(0,255,0))
+				end
+				
+				if result.Hit then
+					goalpos = pos-dir*100
+					bot.loco:Approach(goalpos,1)
+				else
+					bot:JumpToPos(goalpos)
+				end
 			end
 		end
 		
