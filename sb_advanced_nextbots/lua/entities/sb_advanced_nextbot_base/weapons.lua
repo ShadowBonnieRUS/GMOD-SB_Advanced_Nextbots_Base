@@ -273,7 +273,12 @@ end
 	Ret1: bool | Can primary attack
 --]]------------------------------------
 function ENT:CanWeaponPrimaryAttack()
-	return self:HasWeapon() and self:GetActiveLuaWeapon():CanPrimaryAttack() and CurTime()>self.m_WeaponData.Primary.NextShootTime
+	if !self:HasWeapon() or CurTime()<self.m_WeaponData.Primary.NextShootTime then return false end
+	
+	local wep = self:GetActiveLuaWeapon()
+	if CurTime()<wep:GetNextPrimaryFire() then return false end
+
+	return true
 end
 
 --[[------------------------------------
@@ -321,7 +326,12 @@ end
 	Ret1: bool | Can secondary attack
 --]]------------------------------------
 function ENT:CanWeaponSecondaryAttack()
-	return self:HasWeapon() and self:GetActiveLuaWeapon():CanSecondaryAttack() and CurTime()>self.m_WeaponData.Secondary.NextShootTime
+	if !self:HasWeapon() or CurTime()<self.m_WeaponData.Secondary.NextShootTime then return false end
+	
+	local wep = self:GetActiveLuaWeapon()
+	if CurTime()<wep:GetNextSecondaryFire() then return false end
+
+	return true
 end
 
 --[[------------------------------------
