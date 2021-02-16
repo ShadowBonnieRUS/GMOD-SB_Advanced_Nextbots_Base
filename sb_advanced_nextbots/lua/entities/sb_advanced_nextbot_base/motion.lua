@@ -6,6 +6,16 @@ SB_ADVANCED_NEXTBOT_MOTIONTYPE_WALK = 3
 SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCH = 4
 SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCHWALK = 5
 
+-- Default movetype acts can be changed
+ENT.MotionTypeActivities = {
+	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_IDLE] = ACT_MP_STAND_IDLE,
+	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_MOVE] = ACT_MP_RUN,
+	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_RUN] = ACT_MP_RUN,
+	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_WALK] = ACT_MP_WALK,
+	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCH] = ACT_MP_CROUCH_IDLE,
+	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCHWALK] = ACT_MP_CROUCHWALK,
+}
+
 --[[------------------------------------
 	Name: NEXTBOT:SetMotionType
 	Desc: (INTERNAL) Sets bot motion type.
@@ -54,7 +64,7 @@ function ENT:SetupSpeed()
 end
 
 --[[------------------------------------
-	Name: NEXTBOT:GetCurrentSpeed()
+	Name: NEXTBOT:GetCurrentSpeed
 	Desc: Returns bot current motion speed.
 	Arg1: 
 	Ret1: number | Motion speed.
@@ -216,15 +226,6 @@ function ENT:TranslateActivity(act)
 	return IdleActivityTranslate[act] or IdleActivity
 end
 
-local MotionTypeActivity = {
-	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_IDLE] = ACT_MP_STAND_IDLE,
-	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_MOVE] = ACT_MP_RUN,
-	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_RUN] = ACT_MP_RUN,
-	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_WALK] = ACT_MP_WALK,
-	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCH] = ACT_MP_CROUCH_IDLE,
-	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCHWALK] = ACT_MP_CROUCHWALK,
-}
-
 --[[------------------------------------
 	Name: NEXTBOT:SetupActivity
 	Desc: (INTERNAL) Sets right activity to bot.
@@ -236,7 +237,7 @@ function ENT:SetupActivity()
 	local act = self:RunTask("GetDesiredActivity")
 	
 	if !act then
-		act = self:IsJumping() and ACT_MP_JUMP or MotionTypeActivity[self:GetMotionType()]	
+		act = self:IsJumping() and ACT_MP_JUMP or self.MotionTypeActivities[self:GetMotionType()]
 		act = self:TranslateActivity(act)
 	end
 	
@@ -1072,7 +1073,7 @@ end
 	Arg2: bool | foot | false - left foot, true - right foot.
 	Arg3: string | sound | Path to default sound to play.
 	Arg4: number | volume | Volume of footstep.
-	Arg4: CRecipientFilter | filter | Decides who can hear footstep.
+	Arg5: CRecipientFilter | filter | Decides who can hear footstep.
 	Ret1: bool | Should we prevent default sound
 --]]------------------------------------
 function ENT:OnFootstep(pos,foot,sound,volume,filter)
