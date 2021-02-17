@@ -521,11 +521,11 @@ end
 	Ret1: 
 --]]------------------------------------
 function ENT:OnContact(ent)
-	local trace = self:GetTouchTrace()
+	/*local trace = self:GetTouchTrace()		-- Often crashes the game. Waiting for bug report results.
 	
 	if trace.Hit then
 		self:OnTouch(ent,trace)
-	end
+	end*/
 end
 
 --[[------------------------------------
