@@ -224,6 +224,7 @@ end
 	Ret1: bool | Should be enemy or not
 --]]------------------------------------
 function ENT:ShouldBeEnemy(ent)
+	if ent:IsFlagSet(FL_NOTARGET) then return false end
 	if ent:IsPlayer() and GetConVar("ai_ignoreplayers"):GetBool() then return false end
 	if self:GetRelationship(ent)!=D_HT then return false end
 	if !ent.SBAdvancedNextBot and ent:IsNPC() and (ent:GetNPCState()==NPC_STATE_DEAD or ent:GetClass()=="npc_barnacle" and ent:GetInternalVariable("m_takedamage")==0) then return false end
