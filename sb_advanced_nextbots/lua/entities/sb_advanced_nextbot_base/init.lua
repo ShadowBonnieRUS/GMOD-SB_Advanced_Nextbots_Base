@@ -84,6 +84,9 @@ ENT.PathMinLookAheadDistance = 15
 -- Default motion path goal tolerance
 ENT.PathGoalTolerance = 25
 
+-- Default motion path goal tolerance on last segment
+ENT.PathGoalToleranceFinal = 50
+
 -- Default motion path recompute time
 ENT.PathRecompute = 5
 
