@@ -40,6 +40,7 @@ local UseNodeGraph = CreateConVar(
 --]]------------------------------------
 
 ENT.SpawnHealth = 70
+ENT.PathGoalToleranceFinal = 50
 
 local ENEMY_CLASSES
 
