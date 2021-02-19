@@ -521,6 +521,8 @@ end
 	Ret1: 
 --]]------------------------------------
 function ENT:OnContact(ent)
+	//print(ent)
+
 	/*local trace = self:GetTouchTrace()		-- Often crashes the game. Waiting for bug report results.
 	
 	if trace.Hit then
@@ -690,7 +692,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:ControlPath
-	Desc: Moves along path with name or creates new path if names not equal or path is invalid. You should use this to move your bot.
+	Desc: Moves along path. You should use this to move your bot.
 	Arg1: bool | lookatgoal | Should Bot look at goal while moving.
 	Ret1: any | true on path successfully ended, false on path invalidate, nothing otherwise
 --]]------------------------------------
@@ -701,7 +703,9 @@ function ENT:ControlPath(lookatgoal)
 	local pos = self:GetPathPos()
 	local options = self.m_PathOptions
 
-	if self:GetRangeTo(pos)<options.tolerance then
+	local range = self:GetRangeTo(pos)
+	
+	if range<options.tolerance or range<self.PathGoalToleranceFinal then
 		path:Invalidate()
 		return true
 	end
@@ -953,7 +957,10 @@ function ENT:MoveAlongPath(lookatgoal)
 		path:Draw()
 	end
 	
-	if !path:IsValid() and self:GetRangeTo(self:GetPathPos())<=self.m_PathOptions.tolerance then
+	local range = self:GetRangeTo(self:GetPathPos())
+	
+	if !path:IsValid() and range<=self.m_PathOptions.tolerance or range<self.PathGoalToleranceFinal then
+		path:Invalidate()
 		return true
 	end
 	
