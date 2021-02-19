@@ -1,6 +1,8 @@
 AddCSLuaFile()
 
-if CLIENT then
+if SERVER then
+	util.AddNetworkString("weapon_rpg_sb_anb.muzzleflash")
+else
 	killicon.AddFont("weapon_rpg_sb_anb","HL2MPTypeDeath","3",Color(255,80,0))
 end
 
@@ -39,9 +41,6 @@ function SWEP:CanSecondaryAttack()
 	return false
 end
 
-local MAX_TRACE_LENGTH	= 56756
-local vec3_origin		= vector_origin
-
 function SWEP:PrimaryAttack()
 	if !self:CanPrimaryAttack() then return end
 	if IsValid(self.Missile) then return end
@@ -56,16 +55,9 @@ function SWEP:PrimaryAttack()
 	local muzzlepoint = owner:GetShootPos()+forward*12+right*6-up*3
 	
 	local missile = self:CreateMissile(muzzlepoint,ang,owner)
-	missile:SetSaveValue("m_hOwner",owner)
-	
-	local eyepos = owner:GetShootPos()
-	local tr = util.TraceLine({start = eyepos,endpos = eyepos+forward*128,mask = MASK_SHOT,filter = owner,collisiongroup = COLLISION_GROUP_NONE})
-	
-	if tr.Fraction==1 then
-		missile:SetSaveValue("m_flGracePeriodEndsAt",CurTime()+0.3)
-		missile:AddSolidFlags(FSOLID_NOT_SOLID)
-	end
-	
+	missile:SetSaveValue("m_hOwner",self:GetParent())
+	missile:SetSaveValue("m_flGracePeriodEndsAt",CurTime()+0.3)
+	missile:AddSolidFlags(FSOLID_NOT_SOLID)
 	missile:SetSaveValue("m_flDamage",GetConVarNumber("sk_plr_dmg_rpg"))
 	
 	self.Missile = missile
@@ -80,15 +72,31 @@ function SWEP:CreateMissile(pos,ang,owner)
 	local missile = ents.Create("rpg_missile")
 	missile:SetPos(pos)
 	missile:SetAngles(ang)
-	missile:SetSaveValue("m_hOwnerEntity",owner)
+	missile:SetOwner(owner)
 	missile:Spawn()
 	missile:AddEffects(EF_NOSHADOW)
 	
 	local forward = ang:Forward()
-	
-	missile:SetVelocity(forward*300*Vector(0,0,128))
+	missile:SetVelocity(forward*300+Vector(0,0,90))
 	
 	return missile
+end
+
+function SWEP:DoMuzzleFlash()
+	if SERVER then
+		net.Start("weapon_rpg_sb_anb.muzzleflash",true)
+			net.WriteEntity(self)
+		net.SendPVS(self:GetPos())
+	else
+		local MUZZLEFLASH_RPG = 7
+	
+		local ef = EffectData()
+		ef:SetEntity(self:GetParent())
+		ef:SetAttachment(self:LookupAttachment("muzzle"))
+		ef:SetScale(1)
+		ef:SetFlags(MUZZLEFLASH_RPG)
+		util.Effect("MuzzleFlash",ef,false)
+	end
 end
 
 if CLIENT then
