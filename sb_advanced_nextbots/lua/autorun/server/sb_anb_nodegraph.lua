@@ -1061,7 +1061,7 @@ local PathFollower = {
 				filter[#filter+1] = bot
 				
 				local range = math.Distance(pos.x,pos.y,goalpos.x,goalpos.y)/2
-				local topos = pos+dir*range+Vector(0,0,math.max(0,goalpos.z-pos.z+bot.JumpHeight))
+				local topos = pos+dir*range+Vector(0,0,math.max(0,goalpos.z-pos.z+bot.JumpHeight/2))
 				
 				local result = util.TraceHull({
 					start = pos,
