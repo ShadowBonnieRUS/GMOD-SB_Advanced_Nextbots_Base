@@ -34,7 +34,7 @@ function SWEP:Initialize()
 end
 
 function SWEP:CanPrimaryAttack()
-	return CurTime()>=self:GetNextPrimaryFire() and self:Clip1()>0
+	return CurTime()>=self:GetNextPrimaryFire() and self:Clip1()!=0
 end
 
 function SWEP:CanSecondaryAttack()
@@ -49,12 +49,9 @@ function SWEP:PrimaryAttack()
 	
 	self:SetNextPrimaryFire(CurTime()+0.5)
 	
-	local ang = owner:GetEyeAngles()
-	local forward,right,up = ang:Forward(),ang:Right(),ang:Up()
+	local dir = owner:GetAimVector()
 	
-	local muzzlepoint = owner:GetShootPos()+forward*12+right*6-up*3
-	
-	local missile = self:CreateMissile(muzzlepoint,ang,owner)
+	local missile = self:CreateMissile(owner:GetShootPos(),dir:Angle(),owner)
 	missile:SetSaveValue("m_hOwner",self:GetParent())
 	missile:SetSaveValue("m_flGracePeriodEndsAt",CurTime()+0.3)
 	missile:AddSolidFlags(FSOLID_NOT_SOLID)
@@ -131,8 +128,7 @@ function SWEP:CanBePickedUpByNPCs()
 end
 
 function SWEP:GetNPCBulletSpread(prof)
-	local spread = {5,4,3,2,1}
-	return spread[prof+1]
+	return 0
 end
 
 function SWEP:GetNPCBurstSettings()
