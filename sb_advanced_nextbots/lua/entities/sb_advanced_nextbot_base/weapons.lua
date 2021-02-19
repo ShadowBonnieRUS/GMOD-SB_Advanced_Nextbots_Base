@@ -5,7 +5,7 @@ local EngineAnalogs = {
 	weapon_pistol = "weapon_pistol_sb_anb",
 	weapon_357 = "weapon_357_sb_anb",
 	weapon_crossbow = "weapon_crossbow_sb_anb",
-	--weapon_rpg = "weapon_rpg_sb_anb",				-- Crashes game
+	weapon_rpg = "weapon_rpg_sb_anb",
 	weapon_shotgun = "weapon_shotgun_sb_anb",
 }
 
@@ -502,18 +502,3 @@ hook.Add("PlayerCanPickupWeapon","SBAdvancedNextBot",function(ply,wep)
 		return false
 	end
 end)
-
--- FIXFIXFIX
-/*local meta = FindMetaTable("Weapon")
-meta._DefaultReload = meta._DefaultReload or meta.DefaultReload
-
-meta.DefaultReload = function(self,act)
-	local owner = self:GetOwner()
-	
-	if IsValid(owner) and owner.SBAdvancedNextBot then
-		self:SetClip1(self:GetMaxClip1())
-		return true
-	end
-	
-	return self:_DefaultReload(act)
-end*/
