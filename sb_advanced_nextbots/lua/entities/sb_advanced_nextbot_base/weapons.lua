@@ -490,6 +490,17 @@ function ENT:ShouldWeaponAttackUseBurst(wep)
 	return !self:IsControlledByPlayer()
 end
 
+--[[------------------------------------
+	Name: NEXTBOT:IsMeleeWeapon
+	Desc: Returns true if weapon marked as for melee attacks (using CAP_* Enums).
+	Arg1: (optional) Weapon | wep | Weapon to check (this should be lua analog for engine weapon). Without passing will be used active weapon.
+	Ret1: bool | Weapon is melee weapon.
+--]]------------------------------------
+function ENT:IsMeleeWeapon(wep)
+	wep = wep or self:GetActiveWeapon()
+	
+	return IsValid(wep) and wep.GetCapabilities and bit.band(wep:GetCapabilities(),CAP_WEAPON_MELEE_ATTACK1)!=0 or false
+end
 
 hook.Add("PlayerCanPickupWeapon","SBAdvancedNextBot",function(ply,wep)
 	-- Do not allow pickup when bot carries this weapon
