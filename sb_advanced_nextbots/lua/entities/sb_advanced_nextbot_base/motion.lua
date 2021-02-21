@@ -1211,6 +1211,7 @@ end
 --]]------------------------------------
 function ENT:OnStuck()
 	self.m_Stuck = true
+	self:GetPath():Invalidate()
 
 	self:RunTask("OnStuck")
 
