@@ -188,9 +188,9 @@ function ENT:OnKilled(dmg)
 	end
 
 	if !self:RunTask("PreventBecomeRagdollOnKilled",dmg) then
-		local ent = self:BecomeRagdoll(dmg)
+		if dmg:IsDamageType(DMG_DISSOLVE) then self:DissolveEntity() end
 		
-		if IsValid(ent) and dmg:IsDamageType(DMG_DISSOLVE) then self:DissolveEntity(ent) end
+		self:BecomeRagdoll(dmg)
 	end
 	
 	self:RunTask("OnKilled",dmg)
@@ -248,6 +248,10 @@ function ENT:DissolveEntity(ent)
 	dissolver:SetSaveValue("m_flStartTime",0)
 	dissolver:Spawn()
 	dissolver:AddEFlags(EFL_FORCE_CHECK_TRANSMIT)
+	
+	ent:SetSaveValue("m_flDissolveStartTime",0)
+	ent:SetSaveValue("m_hEffectEntity",dissolver)
+	ent:AddFlags(FL_DISSOLVING)
 end
 
 -- Handles Motion methods (Path, Speed, Activity)
