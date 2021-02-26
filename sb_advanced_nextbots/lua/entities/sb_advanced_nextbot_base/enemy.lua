@@ -157,10 +157,15 @@ end
 	Ret1: 
 --]]------------------------------------
 function ENT:FindEnemies()
+	local ShouldBeEnemy = self.ShouldBeEnemy
+	local CanSeePosition = self.CanSeePosition
+	local UpdateEnemyMemory = self.UpdateEnemyMemory
+	local EntShootPos = self.EntShootPos
+
 	for k,v in ipairs(ents.GetAll()) do
-		if v==self or !self:ShouldBeEnemy(v) or !self:CanSeePosition(v) then continue end
+		if v==self or !ShouldBeEnemy(self,v) or !CanSeePosition(self,v) then continue end
 		
-		self:UpdateEnemyMemory(v,self:EntShootPos(v))
+		UpdateEnemyMemory(self,v,EntShootPos(self,v))
 	end
 end
 
@@ -224,11 +229,11 @@ end
 	Ret1: bool | Should be enemy or not
 --]]------------------------------------
 function ENT:ShouldBeEnemy(ent)
-	if ent:IsFlagSet(FL_NOTARGET) then return false end
+	if ent:IsFlagSet(FL_NOTARGET) or !ent:IsPlayer() and !ent:IsNPC() and !ent:IsFlagSet(FL_OBJECT) then return false end
 	if ent:IsPlayer() and GetConVar("ai_ignoreplayers"):GetBool() then return false end
-	if self:GetRelationship(ent)!=D_HT then return false end
 	if !ent.SBAdvancedNextBot and ent:IsNPC() and (ent:GetNPCState()==NPC_STATE_DEAD or ent:GetClass()=="npc_barnacle" and ent:GetInternalVariable("m_takedamage")==0) then return false end
 	if (ent.SBAdvancedNextBot or !ent:IsNPC()) and ent:Health()<=0 then return false end
+	if self:GetRelationship(ent)!=D_HT then return false end
 	if self:GetRangeTo(ent)>self.MaxSeeEnemyDistance then return false end
 	
 	return true
