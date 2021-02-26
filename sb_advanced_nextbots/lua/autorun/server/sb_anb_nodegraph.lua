@@ -254,6 +254,7 @@ local MAX_SEGMENTS			= 128
 
 local Nodes,NodeNum = {},0
 local EditOps = {}
+local NodesPos,NodesLinks = {},{}
 
 local function DevMsg(msg) Msg("SBAdvancedNextbotNodeGraph: ",msg) end
 local function ThrowError(msg) error("SBAdvancedNextbotNodeGraph: "..msg,2) end
@@ -386,22 +387,29 @@ local CAI_Node = {
 		self.m_type = NODE_GROUND
 		self.m_zone = AI_NODE_ZONE_UNKNOWN
 		self.m_info = 0
+		
+		NodesPos[index] = self.m_origin
+		NodesLinks[index] = self.m_origin
 	end,
 
 	_NumLinks = function(self) AssertValid(self) return self.m_NumLinks end,
 	_AddLink = function(self,link)
 		AssertValid(self)
 		
-		if self:_NumLinks()>=AI_MAX_NODE_LINKS then
-			ThrowError("AddLink: Node "..self:GetID().." has too many links")
+		if self.m_NumLinks>=AI_MAX_NODE_LINKS then
+			ThrowError("AddLink: Node "..self.m_id.." has too many links")
 		end
 		
 		self.m_links[self.m_NumLinks] = link
 		self.m_NumLinks = self.m_NumLinks+1
+		
+		if self.m_NumLinks==1 then
+			NodesLinks[self.m_id] = nil
+		end
 	end,
 	_GetLink = function(self,num)
 		AssertValid(self)
-	
+		
 		return self.m_links[num]
 	end,
 	
@@ -417,8 +425,8 @@ local CAI_Node = {
 	
 		local t = {}
 		
-		for i=0,self:_NumLinks()-1 do
-			local link = self:_GetLink(i)
+		for i=0,self.m_NumLinks-1 do
+			local link = self.m_links[i]
 			local neighbor = link:DestNode()
 			
 			t[#t+1] = neighbor
@@ -430,8 +438,8 @@ local CAI_Node = {
 	GetAcceptedMoveTypes = function(self,neighbor)
 		AssertValid(self)
 	
-		for i=0,self:_NumLinks()-1 do
-			local link = self:_GetLink(i)
+		for i=0,self.m_NumLinks-1 do
+			local link = self.m_links[i]
 			
 			if link:DestNode()==neighbor then
 				local t = {}
@@ -449,12 +457,17 @@ local CAI_Node = {
 		return !self.m_Removed
 	end,
 	
-	Remove = function(self)
+	_Remove = function(self)
 		AssertValid(self)
+		
+		NodesPos[self.m_id] = nil
 		
 		for i=0,self:_NumLinks()-1 do
 			local link = self:_GetLink(i)
 			local neighbor = link:DestNode()
+			
+			NodesLinks[self.m_id.."_"..neighbor:GetID()] = nil
+			NodesLinks[neighbor:GetID().."_"..self.m_id] = nil
 			
 			for j=0,neighbor:_NumLinks()-1 do
 				local link = neighbor:_GetLink(j)
@@ -733,7 +746,9 @@ local PathFollower = {
 			return true
 		end
 		
-		return self:_Astar(self.Start,self.Goal,hull,cap)
+		local r = self:_Astar(self.Start,self.Goal,hull,cap)
+		
+		return r
 	end,
 	
 	_TrivialPathCheck = function(self,start,goal,mask,mins,maxs,height,filter)
@@ -1183,7 +1198,7 @@ local function CreateNode(origin,yaw)
 	if NodeNum>=MAX_NODES then
 		DevMsg("ERROR: too many nodes in map, deleting last node.\n")
 
-		Nodes[NodeNum]:Remove()
+		Nodes[NodeNum]:_Remove()
 	end
 	
 	local node = new_Node(NodeNum,origin,yaw)
@@ -1212,6 +1227,8 @@ local function CreateLink(src,dest,movetypes)
 	link2.src = dest
 	link2.dest = src
 	dest:_AddLink(link2)
+	
+	NodesLinks[src:GetID().."_"..dest:GetID()] = {src:GetID(),dest:GetID(),(src:GetOrigin()+dest:GetOrigin())/2,src:GetOrigin():DistToSqr(dest:GetOrigin())/2}
 end
 
 function Load()
@@ -1227,7 +1244,7 @@ function Load()
 	end
 	
 	if f:Read(3)=="Ver" then
-		DevMsg("AI node graph "..filename.." is out of date\n")
+		DevMsg("AI node graph "..filename.." is out of date (old structure)\n")
 		
 		f:Close()
 		return false
@@ -1235,8 +1252,9 @@ function Load()
 	
 	f:Seek(0)
 	
-	if f:ReadLong(3)!=AINET_VERSION_NUMBER then
-		DevMsg("AI node graph "..filename.." is out of date\n")
+	local aiver = f:ReadLong(3)
+	if aiver!=AINET_VERSION_NUMBER then
+		DevMsg("AI node graph "..filename.." is out of date (ai net version: "..aiver..")\n")
 		
 		f:Close()
 		return false
@@ -1262,7 +1280,7 @@ function Load()
 	end
 	
 	for i=0,NodeNum-1 do
-		Nodes[i]:Remove()
+		Nodes[i]:_Remove()
 	end
 	
 	Nodes,NodeNum = {},0
@@ -1328,51 +1346,40 @@ function GetNodesCount()
 	return NodesNum
 end
 
+local DistToSqr = debug.getregistry().Vector.DistToSqr
+local DistanceToLine = util.DistanceToLine
+
 function GetNearestNode(pos)
 	local curnode,curdist
 	
 	if sb_anb_nodegraph_accurategetnearestnode:GetBool() then
 		local used = {}
 	
-		for id=0,NodeNum-1 do
-			local node = Nodes[id]
-			local startpos = node:GetOrigin()
-			
-			used[node] = {}
-			
-			if node:_NumLinks()>0 then
-				for linkid=0,node:_NumLinks()-1 do
-					local link = node:_GetLink(linkid)
-					local dest = link:DestNode()
-					
-					if used[dest] and used[dest][node] then continue end
-					
-					used[node][dest] = true
-					
-					local endpos = dest:GetOrigin()
-					
-					local dist,nearpos = util.DistanceToLine(startpos,endpos,pos)
-					
-					if !curdist or dist*dist<curdist then
-						curnode = nearpos:DistToSqr(endpos)<nearpos:DistToSqr(startpos) and dest or node
-						curdist = dist*dist
-					end
+		for k,v in pairs(NodesLinks) do
+			if istable(v) then
+				if DistToSqr(pos,v[3])>v[4] then continue end
+				
+				local start,endpos = NodesPos[v[1]],NodesPos[v[2]]
+				local dist,nearpos = DistanceToLine(start,endpos,pos)
+				
+				if !curdist or dist*dist<curdist then
+					curnode = DistToSqr(nearpos,start)<DistToSqr(nearpos,endpos) and Nodes[v[1]] or Nodes[v[2]]
+					curdist = dist
 				end
 			else
-				local dist = startpos:DistToSqr(pos)
-				
+				local dist = DistToSqr(pos,v)
+			
 				if !curdist or dist<curdist then
-					curnode,curdist = node,dist
+					curnode,curdist = Nodes[k],dist
 				end
 			end
 		end
 	else
 		for i=0,NodeNum-1 do
-			local node = Nodes[i]
-			local dist = pos:DistToSqr(node:GetOrigin())
+			local dist = DistToSqr(pos,NodesPos[i])
 			
 			if !curdist or dist<curdist then
-				curnode,curdist = node,dist
+				curnode,curdist = Nodes[i],dist
 			end
 		end
 	end
