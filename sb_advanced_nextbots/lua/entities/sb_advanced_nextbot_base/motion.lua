@@ -1289,7 +1289,7 @@ end
 --]]------------------------------------
 function ENT:StuckCheck()
 	if CurTime()>=self.m_StuckTime then
-		self.m_StuckTime = CurTime()+1
+		self.m_StuckTime = CurTime()+math.Rand(0.75,1.25)
 		
 		local pos = self:GetPos()
 		
@@ -1326,7 +1326,7 @@ function ENT:StuckCheck()
 			
 			if !self.m_Stuck then
 				if TraceHit(tr) then
-					self.m_StuckTime2 = self.m_StuckTime2+1
+					self.m_StuckTime2 = self.m_StuckTime2+math.Rand(0.75,1.25)
 					
 					if self.m_StuckTime2>=5 then
 						self:OnStuck()
