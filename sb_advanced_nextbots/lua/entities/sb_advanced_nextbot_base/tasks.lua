@@ -26,32 +26,54 @@ end
 --]]------------------------------------
 
 function ENT:RunTask(event,...)
-	local callbacks = {}
-
-	for k,v in pairs(self.m_ActiveTasks) do
-		local dt = self.m_TaskList[k]
-		if !dt or !dt[event] then continue end
-		
-		callbacks[k] = v
-	end
+	local m_ActiveTasksNum = self.m_ActiveTasksNum
+	if !m_ActiveTasksNum then return end
 	
-	self.m_TaskCallbacks = callbacks
+	local m_TaskList = self.m_TaskList
+	local PassedTasks = {}
 	
-	for k,v in pairs(callbacks) do
-		if !self:IsTaskActive(k) then continue end
+	local k = 1
+	while true do
+		local v = m_ActiveTasksNum[k]
+		if !v then break end
 		
-		local ivarargs,ovarargs = {self,v,...}
-		ProtectedCall(function() ovarargs = {self.m_TaskList[k][event](unpack(ivarargs))} end)
+		local task,data = v[1],v[2]
 		
-		if ovarargs and ovarargs[1]!=nil then
-			return unpack(ovarargs)
+		if PassedTasks[task] then
+			k = k+1
+		
+			continue
 		end
+		PassedTasks[task] = true
+		
+		local callback = m_TaskList[task][event]
+		
+		if callback then
+			local args = {callback(self,data,...)}
+			
+			if args[1]!=nil then
+				if args[2]==nil then
+					return args[1]
+				else
+					return unpack(args)
+				end
+			end
+			
+			while k>0 do
+				local cv = m_ActiveTasksNum[k]
+				if cv==v then break end
+				
+				k = k-1
+			end
+		end
+		
+		k = k+1
 	end
 end
 
 --[[------------------------------------
 	Name: NEXTBOT:RunCurrentTask
-	Desc: Runs give task callback with given event.
+	Desc: Runs given task callback with given event.
 	Arg1: any | task | Task name.
 	Arg2: string | event | Event of hook.
 	Arg*: vararg | Arguments to callback. NOTE: First argument is always bot entity, second argument is always task data, other arguments starts at third argument.
@@ -65,11 +87,14 @@ function ENT:RunCurrentTask(task,event,...)
 	local dt = self.m_TaskList[k]
 	if !dt or !dt[event] then return end
 	
-	local ivarargs,ovarargs = {self,v,...}
-	ProtectedCall(function() ovarargs = {dt[event](unpack(ivarargs))} end)
+	local args = {dt[event](self,v,...)}
 	
-	if ovarargs and ovarargs[1]!=nil then
-		return unpack(varargs)
+	if args[1]!=nil then
+		if args[2]==nil then
+			return args[1]
+		else
+			return unpack(args)
+		end
 	end
 end
 
@@ -85,6 +110,13 @@ function ENT:StartTask(task,data)
 	
 	data = data or {}
 	self.m_ActiveTasks[task] = data
+	
+	local m_ActiveTasksNum = self.m_ActiveTasksNum
+	if !m_ActiveTasksNum then
+		m_ActiveTasksNum = {}
+		self.m_ActiveTasksNum = m_ActiveTasksNum
+	end
+	m_ActiveTasksNum[#m_ActiveTasksNum+1] = {task,data}
 	
 	self:RunCurrentTask(task,"OnStart")
 end
@@ -102,6 +134,14 @@ function ENT:TaskComplete(task)
 	self:RunCurrentTask(task,"OnDelete")
 	
 	self.m_ActiveTasks[task] = nil
+	
+	local m_ActiveTasksNum = self.m_ActiveTasksNum
+	for i=1,#m_ActiveTasksNum do
+		if m_ActiveTasksNum[i][1]==task then
+			table.remove(m_ActiveTasksNum,i)
+			break
+		end
+	end
 end
 
 --[[------------------------------------
@@ -117,6 +157,14 @@ function ENT:TaskFail(task)
 	self:RunCurrentTask(task,"OnDelete")
 	
 	self.m_ActiveTasks[task] = nil
+	
+	local m_ActiveTasksNum = self.m_ActiveTasksNum
+	for i=1,#m_ActiveTasksNum do
+		if m_ActiveTasksNum[i][1]==task then
+			table.remove(m_ActiveTasksNum,i)
+			break
+		end
+	end
 end
 
 --[[------------------------------------
