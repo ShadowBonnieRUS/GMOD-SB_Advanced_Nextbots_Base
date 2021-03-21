@@ -1209,8 +1209,8 @@ local function CreateNode(origin,yaw)
 end
 
 local function CreateLink(src,dest,movetypes)
-	if src:_NumLinks()>=AI_MAX_NODE_LINKS then ThrowError(2,"CreateLink: Node "..src:GetID().." has too many links") end
-	if dest:_NumLinks()>=AI_MAX_NODE_LINKS then ThrowError(2,"CreateLink: Node "..dest:GetID().." has too many links") end
+	if src:_NumLinks()>=AI_MAX_NODE_LINKS then ThrowError("CreateLink: Node "..src:GetID().." has too many links") end
+	if dest:_NumLinks()>=AI_MAX_NODE_LINKS then ThrowError("CreateLink: Node "..dest:GetID().." has too many links") end
 	
 	local link1 = new_Link()
 	local link2 = new_Link()
@@ -1364,7 +1364,7 @@ function GetNearestNode(pos)
 				
 				if !curdist or dist*dist<curdist then
 					curnode = DistToSqr(nearpos,start)<DistToSqr(nearpos,endpos) and Nodes[v[1]] or Nodes[v[2]]
-					curdist = dist
+					curdist = dist*dist    
 				end
 			else
 				local dist = DistToSqr(pos,v)
