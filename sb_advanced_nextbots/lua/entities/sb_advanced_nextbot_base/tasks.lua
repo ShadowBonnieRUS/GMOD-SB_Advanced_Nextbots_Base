@@ -21,7 +21,7 @@ end
 	Name: NEXTBOT:RunTask
 	Desc: Runs active tasks callbacks with given event.
 	Arg1: string | event | Event of hook.
-	Arg*: vararg | Arguments to callback. NOTE: First argument is always bot entity, second argument is always task data, other arguments starts at third argument.
+	Arg*: vararg | Arguments to callback. NOTE: In callback, first argument is always bot entity, second argument is always task data, passed arguments from NEXTBOT:RunTask starts at third argument.
 	Ret*: vararg | Callback return.
 --]]------------------------------------
 
@@ -73,10 +73,10 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:RunCurrentTask
-	Desc: Runs given task callback with given event.
+	Desc: Runs one given task callback with given event.
 	Arg1: any | task | Task name.
 	Arg2: string | event | Event of hook.
-	Arg*: vararg | Arguments to callback. NOTE: First argument is always bot entity, second argument is always task data, other arguments starts at third argument.
+	Arg*: vararg | Arguments to callback. NOTE: In callback, first argument is always bot entity, second argument is always task data, passed arguments from NEXTBOT:RunTask starts at third argument.
 	Ret*: vararg | Callback return.
 --]]------------------------------------
 function ENT:RunCurrentTask(task,event,...)
@@ -100,7 +100,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:StartTask
-	Desc: Starts new task with given data. Does nothing if given task already exists.
+	Desc: Starts new task with given data and calls 'OnStart' task callback. Does nothing if given task already started.
 	Arg1: any | task | Task name.
 	Arg2: (optional) table | data | Task data.
 	Ret1: 
@@ -123,7 +123,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:TaskComplete
-	Desc: Calls 'OnComplete' task callback and deletes task. Does nothing if given task not exists.
+	Desc: Calls 'OnComplete' and 'OnDelete' task callbacks and deletes task. Does nothing if given task not started.
 	Arg1: any | task | Task name.
 	Ret1: 
 --]]------------------------------------
@@ -146,7 +146,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:TaskFail
-	Desc: Calls 'OnFail' task callback and deletes task. Does nothing if given task not exists.
+	Desc: Calls 'OnFail' and 'OnDelete' task callbacks and deletes task. Does nothing if given task not started.
 	Arg1: any | task | Task name.
 	Ret1: 
 --]]------------------------------------
