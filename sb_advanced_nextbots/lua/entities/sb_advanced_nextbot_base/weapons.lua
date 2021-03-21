@@ -16,7 +16,7 @@ for k,v in pairs(EngineAnalogs) do EngineAnalogsReverse[v] = k end
 	Name: NEXTBOT:Give
 	Desc: Gives weapon to bot.
 	Arg1: string | wepname | Class name of weapon.
-	Ret1: Weapon | Weapon given to bot. NULL if failed to give that weapon.
+	Ret1: Weapon | Weapon given to bot. Returns NULL if failed to give this weapon.
 --]]------------------------------------
 function ENT:Give(wepname)
 	local wep = ents.Create(wepname)
@@ -51,7 +51,7 @@ end
 	Name: NEXTBOT:SetupWeapon
 	Desc: Makes bot hold this weapon.
 	Arg1: Weapon | wep | Weapon to hold.
-	Ret1: Weapon | Parented weapon. If wep is engine weapon, then this will be lua analog.
+	Ret1: Weapon | Parented weapon. If give weapon is engine weapon, then this will be lua analog. Returns nil if failed to setup.
 --]]------------------------------------
 function ENT:SetupWeapon(wep)
 	if !IsValid(wep) or wep==self:GetActiveWeapon() then return end
@@ -268,9 +268,9 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:CanWeaponPrimaryAttack
-	Desc: Can bot do primary attack
+	Desc: Returns can bot do primary attack or not.
 	Arg1: 
-	Ret1: bool | Can primary attack
+	Ret1: bool | Can do primary attack
 --]]------------------------------------
 function ENT:CanWeaponPrimaryAttack()
 	if !self:HasWeapon() or CurTime()<self.m_WeaponData.Primary.NextShootTime then return false end
@@ -283,7 +283,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:WeaponPrimaryAttack
-	Desc: Does primary attack from bot active weapon. This also uses burst data from weapon.
+	Desc: Does primary attack from bot's active weapon. This also uses burst data from weapon.
 	Arg1: 
 	Ret1: 
 --]]------------------------------------
@@ -321,9 +321,9 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:CanWeaponSecondaryAttack
-	Desc: Can bot do secondary attack
+	Desc: Returns can bot do secondary attack or not.
 	Arg1: 
-	Ret1: bool | Can secondary attack
+	Ret1: bool | Can do secondary attack
 --]]------------------------------------
 function ENT:CanWeaponSecondaryAttack()
 	if !self:HasWeapon() or CurTime()<self.m_WeaponData.Secondary.NextShootTime then return false end
@@ -336,7 +336,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:WeaponSecondaryAttack
-	Desc: Does secondary attack from bot active weapon.
+	Desc: Does secondary attack from bot's active weapon.
 	Arg1: 
 	Ret1: 
 --]]------------------------------------
@@ -422,7 +422,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:SetCurrentWeaponProficiency
-	Desc: Sets how skilled bot with weapons. See WEAPON_PROFICIENCY_ Enums
+	Desc: Sets how skilled bot with weapons. See WEAPON_PROFICIENCY_ Enums.
 	Arg1: number | prof | Weapon proficiency
 	Ret1: 
 --]]------------------------------------
@@ -432,7 +432,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:GetCurrentWeaponProficiency
-	Desc: Returns how skilled bot with weapons. See WEAPON_PROFICIENCY_ Enums
+	Desc: Returns how skilled bot with weapons. See WEAPON_PROFICIENCY_ Enums.
 	Arg1: 
 	Ret1: number | Weapon proficiency
 --]]------------------------------------
@@ -452,7 +452,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:OnWeaponDrop
-	Desc: Called when bot drop weapon.
+	Desc: Called when bot drops weapon.
 	Arg1: Entity | wep | Dropped weapon. It will be not lua analog.
 	Ret1: 
 --]]------------------------------------
@@ -472,7 +472,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:CanDropWeaponOnDie
-	Desc: Decides can bot drop weapon on die. Weapon also may not drop even with `true` if weapon's `SWEP:ShouldDropOnDie` returns `false`.
+	Desc: Decides can bot drop weapon on die. NOTE: Weapon also may not drop even with `true` if weapon's `SWEP:ShouldDropOnDie` returns `false`.
 	Arg1: Weapon | wep | Current active weapon (this will be lua analog for engine weapon).
 	Ret1: bool | Can drop.
 --]]------------------------------------
@@ -484,7 +484,7 @@ end
 	Name: NEXTBOT:ShouldWeaponAttackUseBurst
 	Desc: Decides should bot shoot with bursts.
 	Arg1: Weapon | wep | Current active weapon (this will be lua analog for engine weapon).
-	Ret1: bool | Should use burst.
+	Ret1: bool | Should use bursts.
 --]]------------------------------------
 function ENT:ShouldWeaponAttackUseBurst(wep)
 	return !self:IsControlledByPlayer()
