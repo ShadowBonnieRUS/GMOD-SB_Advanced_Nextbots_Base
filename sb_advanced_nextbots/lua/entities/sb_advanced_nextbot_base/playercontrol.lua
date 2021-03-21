@@ -55,7 +55,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:ControlPlayerKeyDown
-	Desc: Returns true if key of player who control bot is downed.
+	Desc: Returns true if key of player who controls bot is downed.
 	Arg1: number | key | Key. See IN_ Enums
 	Ret1: bool | Key is downed
 --]]------------------------------------
@@ -65,7 +65,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:ControlPlayerKeyPressed
-	Desc: Returns true if player who control bot has pressed that key in this bot behaviour tick.
+	Desc: Returns true if player who controls bot has pressed given key at this bot behaviour tick.
 	Arg1: number | key | Key. See IN_ Enums
 	Ret1: bool | Key is pressed
 --]]------------------------------------
