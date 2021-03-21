@@ -1,3 +1,5 @@
+local INT_MIN = -2147483648
+local DEF_RELATIONSHIP_PRIORITY = INT_MIN
 
 --[[------------------------------------
 	Name: NEXTBOT:SetEnemy
@@ -28,7 +30,7 @@ end
 	Ret1: 
 --]]------------------------------------
 function ENT:SetClassRelationship(class,d,priority)
-	self.m_ClassRelationships[class] = {d,priority or 0}
+	self.m_ClassRelationships[class] = {d,priority or DEF_RELATIONSHIP_PRIORITY}
 end
 
 --[[------------------------------------
@@ -40,7 +42,7 @@ end
 	Ret1: 
 --]]------------------------------------
 function ENT:SetEntityRelationship(ent,d,priority)
-	self.m_EntityRelationships[ent] = {d,priority or 0}
+	self.m_EntityRelationships[ent] = {d,priority or DEF_RELATIONSHIP_PRIORITY}
 end
 
 --[[------------------------------------
@@ -51,19 +53,19 @@ end
 	Ret2: number | Priority of disposition.
 --]]------------------------------------
 function ENT:GetRelationship(ent)
-	local d,priority = D_NU,-1
+	local d,priority
 	
 	local entr = self.m_EntityRelationships[ent]
-	if entr and entr[2]>priority then
+	if entr and (!priority or entr[2]>priority) then
 		d,priority = entr[1],entr[2]
 	end
 	
 	local classr = self.m_ClassRelationships[ent:GetClass()]
-	if classr and classr[2]>priority then
+	if classr and (!priority or classr[2]>priority) then
 		d,priority = classr[1],classr[2]
 	end
 	
-	return d,priority
+	return d or D_NU,priority or DEF_RELATIONSHIP_PRIORITY
 end
 
 --[[------------------------------------
@@ -106,7 +108,7 @@ function ENT:EntShootPos(ent,random)
 		end
 	end
 	
-	return ent.GetShootPos and ent:GetShootPos() or ent:WorldSpaceCenter()
+	return ent:EyePos()
 end
 
 --[[------------------------------------
