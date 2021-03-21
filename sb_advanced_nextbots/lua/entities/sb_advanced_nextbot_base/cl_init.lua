@@ -1,5 +1,9 @@
 include("shared.lua")
 
+--[[------------------------------------
+	NEXTBOT:Initialize
+	Initialize our bot
+--]]------------------------------------
 function ENT:Initialize()
 	self.m_TaskList = {}
 	self.m_ActiveTasks = {}
@@ -9,6 +13,10 @@ function ENT:Initialize()
 	self:SetupTasks()
 end
 
+--[[------------------------------------
+	NEXTBOT:Draw
+	Drawing our bot and run Draw task
+--]]------------------------------------
 function ENT:Draw()
 	self:DrawModel()
 	
