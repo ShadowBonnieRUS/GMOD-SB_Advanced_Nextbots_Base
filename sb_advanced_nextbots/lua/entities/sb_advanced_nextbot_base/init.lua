@@ -6,40 +6,40 @@ include("shared.lua")
 	NEXTBOT Settings
 --]]-------------------------------------------------------
 
--- Default bot model
+-- Default bot's model
 ENT.Model = "models/player/combine_super_soldier.mdl"
 
--- Default bot weapon on spawn
+-- Default bot's weapon on spawn
 ENT.DefaultWeapon = nil
 
--- Default bot health
+-- Default bot's health
 ENT.SpawnHealth = 100
 
--- Bot desired move speed
+-- Bot's desired move speed
 ENT.MoveSpeed = 200
 
--- Bot desired run speed
+-- Bot's desired run speed
 ENT.RunSpeed = 320
 
--- Bot desired walk speed
+-- Bot's desired walk speed
 ENT.WalkSpeed = 100
 
--- Bot desired crouch walk speed
+-- Bot's desired crouch walk speed
 ENT.CrouchSpeed = 120
 
--- Bot acceleration speed
+-- Bot's acceleration speed
 ENT.AccelerationSpeed = 1000
 
--- Bot deceleration speed
+-- Bot's deceleration speed
 ENT.DecelerationSpeed = 3000
 
--- Bot aiming speed
+-- Bot's aiming speed, in degrees per second
 ENT.AimSpeed = 180
 
--- Bots collision bounds, min max
+-- Bot's collision bounds, min max
 ENT.CollisionBounds = {Vector(-16,-16,0),Vector(16,16,72)}
 
--- Bots collision bounds while crouch, min max
+-- Bot's collision bounds when crouching, min max
 ENT.CrouchCollisionBounds = {Vector(-16,-16,0),Vector(16,16,36)}
 
 -- Can bot crouch
@@ -48,10 +48,10 @@ ENT.CanCrouch = true
 -- Max height the bot can step up
 ENT.StepHeight = 18
 
--- Bot jump height
+-- Bot's jump height
 ENT.JumpHeight = 70
 
--- Height limit for path finding. Using nodegraph for CAP_MOVE_JUMP links, too high nodes will be skipped. For navmesh, not jumping on NAV_MESH_JUMP if too high.
+-- Height limit for path finding. Using nodegraph for CAP_MOVE_JUMP links, too high nodes will be skipped. For navmesh, not jumping on NAV_MESH_JUMP if too high
 ENT.MaxJumpToPosHeight = ENT.JumpHeight
 
 -- Height the bot is scared to fall from
@@ -69,10 +69,10 @@ ENT.SolidMask = MASK_NPCSOLID
 -- Mask used in line of sight test trace
 ENT.LineOfSightMask = MASK_BLOCKLOS
 
--- Time need to forget enemy if bot dont see him
+-- Time need to forget enemy if bot doesn't see it
 ENT.ForgetEnemyTime = 30
 
--- Distance need to change to nearest enemy in NEXTBOT:FindPriorityEnemy if enemy very close
+-- Distance at which enemy should be to make bot think enemy is very close
 ENT.CloseEnemyDistance = 500
 
 -- Max distance at which bot can see enemies
@@ -290,6 +290,9 @@ function ENT:ClearSchedule() end
 function ENT:GetCurrentSchedule() return SCHED_NONE end
 function ENT:IsCurrentSchedule(schedule) return schedule==SCHED_NONE end
 function ENT:SetSchedule(schedule) end
+
+function ENT:SetNPCState(state) end
+function ENT:GetNPCState() return NPC_STATE_NONE end
 
 function ENT:AddEntityRelationship(target,disposition,priority) self:SetEntityRelationship(target,disposition,prioroty) end
 function ENT:AddRelationship(str)
