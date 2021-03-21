@@ -5,6 +5,7 @@ SB_ADVANCED_NEXTBOT_MOTIONTYPE_RUN = 2
 SB_ADVANCED_NEXTBOT_MOTIONTYPE_WALK = 3
 SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCH = 4
 SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCHWALK = 5
+SB_ADVANCED_NEXTBOT_MOTIONTYPE_JUMPING = 6
 
 -- Default movetype acts can be changed
 ENT.MotionTypeActivities = {
@@ -14,6 +15,7 @@ ENT.MotionTypeActivities = {
 	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_WALK] = ACT_MP_WALK,
 	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCH] = ACT_MP_CROUCH_IDLE,
 	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCHWALK] = ACT_MP_CROUCHWALK,
+	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_JUMPING] = ACT_MP_JUMP,
 }
 
 --[[------------------------------------
@@ -103,7 +105,9 @@ function ENT:SetupMotionType()
 	local moving = self:IsMoving()
 	local type = SB_ADVANCED_NEXTBOT_MOTIONTYPE_IDLE
 	
-	if self:IsCrouching() then
+	if self:IsJumping() then
+		type = SB_ADVANCED_NEXTBOT_MOTIONTYPE_JUMPING
+	elseif self:IsCrouching() then
 		type = moving and SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCHWALK or SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCH
 	elseif moving then
 		local speed = self:GetCurrentSpeed()
@@ -237,7 +241,7 @@ function ENT:SetupActivity()
 	local act = self:RunTask("GetDesiredActivity")
 	
 	if !act then
-		act = self:IsJumping() and ACT_MP_JUMP or self.MotionTypeActivities[self:GetMotionType()]
+		act = self.MotionTypeActivities[self:GetMotionType()]
 		act = self:TranslateActivity(act)
 	end
 	
@@ -857,8 +861,6 @@ end
 	Ret1: bool | Path was completed right now
 --]]------------------------------------
 function ENT:MoveAlongPath(lookatgoal)
-	local t = SysTime()
-
 	local path = self:GetPath()
 	local segment = path:GetCurrentGoal()
 	
@@ -909,10 +911,10 @@ function ENT:MoveAlongPath(lookatgoal)
 			end
 			
 			if
-				jumptype or	-- jump segment
-				area:HasAttributes(NAV_MESH_JUMP) or	-- jump area
+				jumptype or																-- jump segment
+				area:HasAttributes(NAV_MESH_JUMP) or									-- jump area
 				jumpstate and CurTime()-self.m_PathJumpTime>self.PathStuckJumpTime or	-- founded obstacle, can be jumped and seems we stuck
-				jumpstate==nil and self.m_PathJump	-- we are back enough to jump
+				jumpstate==nil and self.m_PathJump										-- we are back enough to jump
 			then
 				if jumpstate then
 					-- We are too close to obstacle, should step back
@@ -1045,7 +1047,7 @@ function ENT:OnLandOnGround(ent)
 		end
 	end
 	
-	self:RunTask("OnLandOnGroud",ent)
+	self:RunTask("OnLandOnGround",ent)
 end
 
 --[[------------------------------------
