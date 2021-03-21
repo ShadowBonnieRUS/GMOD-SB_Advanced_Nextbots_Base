@@ -10,13 +10,13 @@ ENT.Spawnable = false
 
 ENT.SBAdvancedNextBot = true
 
--- Distance of view while controling bot
+-- Offset of view while controling bot
 ENT.ControlCameraOffset = Vector(-70,10,5)
 
--- Bot eye position relative bot position
+-- Bot's eye position relative bot position
 ENT.ViewOffset = Vector(0,0,64)
 
--- Bot eye position relative bot position when crouch
+-- Bot's eye position relative bot position when crouching
 ENT.CrouchViewOffset = Vector(0,0,32)
 
 -- Bot's view punch duration
@@ -24,7 +24,7 @@ ENT.ViewPunchLength = 0.5
 
 --[[------------------------------------
 	Name: AddNetworkVar
-	Desc: (LOCAL) Add Get* and Set* functions. This uses directly SetDT* and GetDT*, this will faster than ENT:NetworkVar
+	Desc: (LOCAL) Add Get* and Set* functions. This uses directly SetDT* and GetDT*, this will be faster than ENT:NetworkVar
 	Arg1: string | type | Type of var.
 	Arg2: number | slot | Slot number in DataTable.
 	Arg3: string | name | Name of var. Used as name of Set`name` and Get`name` functions.
@@ -120,7 +120,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:GetShootPos
-	Desc: Returns bot eye position.
+	Desc: Returns bot's eye position.
 	Arg1: 
 	Ret1: Vector | Eye position.
 --]]------------------------------------
