@@ -252,9 +252,18 @@ local AI_MAX_NODE_LINKS		= 30
 local AINET_VERSION_NUMBER	= 37
 local MAX_SEGMENTS			= 128
 
+local NO_NODE				= -1
+local LINK_OFF				= 0
+local LINK_ON				= 1
+
+local bits_LINK_STALE_SUGGESTED = 0x01
+local bits_LINK_OFF			= 0x02
+local bits_HULL_BITS_MASK	= 0x000002ff
+
 local Nodes,NodeNum = {},0
-local EditOps = {}
+local EditOps,EditOpsInvert = {},{}
 local NodesPos,NodesLinks = {},{}
+local DynamicLinks = {}
 
 local function DevMsg(msg) Msg("SBAdvancedNextbotNodeGraph: ",msg) end
 local function ThrowError(msg) error("SBAdvancedNextbotNodeGraph: "..msg,2) end
@@ -364,6 +373,30 @@ local function debugoverlay_HorzArrow(startpos,endpos,width,time,color,nodepth)
 	end
 end
 
+local function NameMatch(query,name)
+	if name=="" then
+		return !query or query=="*"
+	end
+	
+	if query==name then
+		return true
+	end
+	
+	if !query and !name then
+		return true
+	end
+	
+	if query:lower()==name:lower() then
+		return true
+	end
+	
+	if query=="*" then
+		return true
+	end
+	
+	return false
+end
+
 local sb_anb_nodegraph_drawnodes = CreateConVar("sb_anb_nodegraph_drawnodes","0",bit.bor(FCVAR_NEVER_AS_STRING,FCVAR_ARCHIVE))
 local sb_anb_nodegraph_drawnodes_hull = CreateConVar("sb_anb_nodegraph_drawnodes_hull","0",bit.bor(FCVAR_NEVER_AS_STRING,FCVAR_ARCHIVE))
 local sb_anb_nodegraph_pathdebug = CreateConVar("sb_anb_nodegraph_pathdebug","0",bit.bor(FCVAR_NEVER_AS_STRING,FCVAR_ARCHIVE))
@@ -461,6 +494,7 @@ local CAI_Node = {
 		AssertValid(self)
 		
 		NodesPos[self.m_id] = nil
+		NodesLinks[self.m_id] = nil
 		
 		for i=0,self:_NumLinks()-1 do
 			local link = self:_GetLink(i)
@@ -473,7 +507,15 @@ local CAI_Node = {
 				local link = neighbor:_GetLink(j)
 				
 				if link:DestNode()==self then
-					table.remove(neighbor.m_links,j)
+					for k=j,neighbor:_NumLinks()-1 do
+						neighbor.m_links[k] = Either(k==neighbor:_NumLinks()-1,nil,neighbor.m_links[k+1])
+					end
+					
+					neighbor.m_NumLinks = neighbor.m_NumLinks-1
+					
+					if neighbor:_NumLinks()==0 then
+						NodesLinks[neighbor:GetID()] = neighbor:GetOrigin()
+					end
 					
 					break
 				end
@@ -505,6 +547,66 @@ local CAI_Link = {
 	DestNode = function(self) return self.dest end,
 	SrcNode = function(self) return self.src end,
 	DestNodeID = function(self) return self.dest:GetID() end,
+}
+
+local CAI_DynamicLink = {
+	_initialize = function(self)
+		self.m_state = self:GetLinkState()
+	
+		DynamicLinks[self] = true
+	end,
+	
+	GetSrcNodeID = function(self) return self.dlink:GetInternalVariable("startnode") end,
+	GetDestNodeID = function(self) return self.dlink:GetInternalVariable("endnode") end,
+	GetStrAllowUse = function(self) return self.dlink:GetInternalVariable("AllowUse") end,
+	GetLinkState = function(self) return self.dlink:GetInternalVariable("initialstate") end,
+	GetLinkType = function(self) return self.dlink:GetInternalVariable("linktype") end,
+	GetInvertAllow = function(self) return self.dlink:GetInternalVariable("m_bInvertAllow") end,
+	
+	IsValid = function(self) return IsValid(self.dlink) end,
+	
+	UpdateState = function(self)
+		local state = self:GetLinkState()
+		
+		if self.m_state!=state then
+			self.m_state = state
+			
+			self:UpdateLinkInfo()
+		end
+	end,
+	
+	UpdateLinkInfo = function(self)
+		local src = EditOpsInvert[self:GetSrcNodeID()]
+		local dest = EditOpsInvert[self:GetDestNodeID()]
+		
+		local srcnode = Nodes[src]
+		local destnode = Nodes[dest]
+		
+		if srcnode and destnode then
+			local link
+			
+			for i=0,srcnode:_NumLinks()-1 do
+				local l = srcnode:_GetLink(i)
+				
+				if l:DestNode()==destnode then
+					link = l
+					break
+				end
+			end
+			
+			if !link then
+				DevMsg("Dynamic Link Error: "..tostring(self.dlink).." unable to form between nodes "..src.." and "..dest.."\n")
+			else
+				link.dlink = self
+				
+				if self.m_state==LINK_OFF then
+					link.m_info = bit.bor(link.m_info,bits_LINK_OFF)
+				else
+					link.m_info = bit.band(link.m_info,bit.bnot(bits_LINK_OFF))
+				end
+			end
+		end
+	end
 }
 
 local SearchList = {
@@ -635,6 +737,27 @@ local PathFollower = {
 			
 			for i=0,node:_NumLinks()-1 do
 				local link = node:_GetLink(i)
+				
+				if bit.band(link.m_info,bits_LINK_OFF)!=0 then
+					local dlink = link.dlink
+					
+					if !dlink or !dlink:IsValid() or dlink:GetStrAllowUse()=="" then
+						continue
+					end
+					
+					local allowuse = dlink:GetStrAllowUse()
+					
+					if dlink:GetInvertAllow() then
+						if NameMatch(allowuse,self.m_Bot:GetName()) or NameMatch(allowuse,self.m_Bot:GetClass()) then
+							continue
+						end
+					else
+						if !NameMatch(allowuse,self.m_Bot:GetName()) and !NameMatch(allowuse,self.m_Bot:GetClass()) then
+							continue
+						end
+					end
+				end
+				
 				local curcap = link.m_AcceptedMoveTypes[hull]
 				
 				if bit.band(cap,curcap)==0 then continue end
@@ -740,15 +863,13 @@ local PathFollower = {
 		local mins,maxs = Vector(bounds[1]),Vector(bounds[2])
 		mins.z = mins.z+step
 		
-		if self:_TrivialPathCheck(self.Start,self.Goal,mask,mins,maxs,step,self) then
+		if self:_TrivialPathCheck(self.Start,self.Goal,mask,mins,maxs,step,bot) then
 			self:_ConstructTrivial(self.Start,self.Goal,GetNearestNode(self.Start))
 			
 			return true
 		end
 		
-		local r = self:_Astar(self.Start,self.Goal,hull,cap)
-		
-		return r
+		return self:_Astar(self.Start,self.Goal,hull,cap)
 	end,
 	
 	_TrivialPathCheck = function(self,start,goal,mask,mins,maxs,height,filter)
@@ -1175,7 +1296,7 @@ local PathFollower = {
 local SBNodeGraphPathFollower = {
 	__index = PathFollower,
 	__tostring = function(self)
-		return self:IsValid() and "SBNodeGraphPathFollower"
+		return "SBNodeGraphPathFollower"
 	end,
 }
 debug.getregistry().SBNodeGraphPathFollower = SBNodeGraphPathFollower
@@ -1189,6 +1310,14 @@ end
 
 local function new_Link()
 	local link = NewObject({__index = CAI_Link})
+	link:_initialize()
+	
+	return link
+end
+
+local function new_DynamicLink(dlink)
+	local link = NewObject({__index = CAI_DynamicLink})
+	link.dlink = dlink
 	link:_initialize()
 	
 	return link
@@ -1229,6 +1358,8 @@ local function CreateLink(src,dest,movetypes)
 	dest:_AddLink(link2)
 	
 	NodesLinks[src:GetID().."_"..dest:GetID()] = {src:GetID(),dest:GetID(),(src:GetOrigin()+dest:GetOrigin())/2,src:GetOrigin():DistToSqr(dest:GetOrigin())/2}
+	
+	return link1,link2
 end
 
 function Load()
@@ -1266,8 +1397,8 @@ function Load()
 	if mapver!=mapversion then
 		DevMsg("AI node graph "..filename.." is out of date (map version changed) (map: "..mapversion..", nodegraph: "..mapver..")\n")
 		
-		f:Close()
-		return false
+		//f:Close()
+		//return false
 	end
 	
 	local numNodes = f:ReadLong()
@@ -1319,13 +1450,72 @@ function Load()
 		CreateLink(src,dest,movetypes)
 	end
 	
-	EditOps = {}
+	EditOps,EditOpsInvert = {},{}
 	
 	for i=0,numNodes-1 do
-		EditOps[i] = f:ReadLong()
+		local wcid = f:ReadLong()
+		
+		EditOps[i] = wcid
+		EditOpsInvert[wcid] = i
 	end
 	
-	DevMsg("NodeGraph loaded successfully. Nodes: "..numNodes..", Links: "..numLinks..".\n")
+	local dlinks = 0
+	DynamicLinks = {}
+	
+	for k,v in ipairs(ents.FindByClass("info_node_link")) do
+		local dlink = new_DynamicLink(v)
+		
+		local src = EditOpsInvert[dlink:GetSrcNodeID()]
+		local dest = EditOpsInvert[dlink:GetDestNodeID()]
+		
+		if !src then
+			DevMsg("Dynamic link source WC node "..dlink:GetSrcNodeID().." not found\n")
+			continue
+		end
+		
+		if !dest then
+			DevMsg("Dynamic link dest WC node "..dlink:GetDestNodeID().." not found\n")
+			continue
+		end
+		
+		local srcnode = Nodes[src]
+		local destnode = Nodes[dest]
+		
+		if bit.band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)!=0 then
+			local link
+		
+			for i=0,srcnode:_NumLinks()-1 do
+				local l = srcnode:_GetLink(i)
+				
+				if l:DestNode()==destnode then
+					link = l
+					break
+				end
+			end
+			
+			if !link then
+				local movetypes = {}
+				for i=0,NUM_HULLS-1 do movetypes[i] = 0 end
+				
+				link = CreateLink(srcnode,destnode,movetypes)
+			end
+			
+			link.dlink = dlink
+			dlink:UpdateLinkInfo()
+		
+			local hullbits = bit.band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)
+			
+			for i=0,NUM_HULLS-1 do
+				if bit.band(hullbits,bit.lshift(1,i))!=0 then
+					link.m_AcceptedMoveTypes[i] = dlink:GetLinkType()
+				end
+			end
+			
+			dlinks = dlinks+1
+		end
+	end
+	
+	DevMsg("NodeGraph loaded successfully. Nodes: "..numNodes..", Links: "..numLinks..", Dynamic Links: "..dlinks.."\n")
 	
 	f:Close()
 	
@@ -1343,7 +1533,7 @@ function GetAllNodes()
 end
 
 function GetNodesCount()
-	return NodesNum
+	return NodeNum
 end
 
 local DistToSqr = debug.getregistry().Vector.DistToSqr
@@ -1391,12 +1581,32 @@ function GetNodeByID(id)
 	return Nodes[id]
 end
 
+function GetEditOps()
+	local t = {}
+	
+	for i=1,#EditOps do
+		t[i] = EditOps[i]
+	end
+	
+	return t
+end
+
 function Path()
 	local path = NewObject(SBNodeGraphPathFollower)
 	path:_initialize()
 	
 	return path
 end
+
+hook.Add("Think","sb_anb_nodegraph_dlinks",function()
+	for link,_ in pairs(DynamicLinks) do
+		if !link:IsValid() then
+			DynamicLinks[link] = nil
+		else
+			link:UpdateState()
+		end
+	end
+end)
 
 timer.Create("sb_anb_nodegraph_drawnodes",1,0,function()
 	local drawtype = sb_anb_nodegraph_drawnodes:GetInt()
@@ -1406,8 +1616,6 @@ timer.Create("sb_anb_nodegraph_drawnodes",1,0,function()
 	
 	local mins = Vector(-5,-5,-5)
 	local maxs = Vector(5,5,5)
-	
-	local drawedlines = {}
 	
 	for i=0,NodeNum-1 do
 		local node = Nodes[i]
@@ -1434,20 +1642,22 @@ timer.Create("sb_anb_nodegraph_drawnodes",1,0,function()
 			debugoverlay.Text(node:GetOrigin()+Vector(0,0,1),node:GetID(),1.5,true)
 		end
 		
-		drawedlines[node] = {}
-		
 		for j=0,node:_NumLinks()-1 do
 			local link = node:_GetLink(j)
 			local dest = link:DestNode()
 			
-			if drawedlines[dest] and drawedlines[dest][node] then continue end
-			drawedlines[node][dest] = true
+			if dest:GetID()<node:GetID() then continue end
 			
 			local movetype = link.m_AcceptedMoveTypes[hull]
+			local linkinfo = link.m_info
 			
 			r,g,b = 255,0,0
 			
-			if bit.band(movetype,CAP_MOVE_FLY)!=0 then
+			if bit.band(linkinfo,bits_LINK_STALE_SUGGESTED)!=0 then
+				r,g,b = 255,0,0
+			elseif bit.band(linkinfo,bits_LINK_OFF)!=0 then
+				r,g,b = 100,100,100
+			elseif bit.band(movetype,CAP_MOVE_FLY)!=0 then
 				r,g,b = 100,255,255
 			elseif bit.band(movetype,CAP_MOVE_CLIMB)!=0 then
 				r,g,b = 255,0,255
