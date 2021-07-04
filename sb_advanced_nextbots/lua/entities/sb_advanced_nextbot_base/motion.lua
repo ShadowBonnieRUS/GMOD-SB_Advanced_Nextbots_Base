@@ -273,9 +273,13 @@ end
 --]]------------------------------------
 function ENT:DoPosture(act,issequence,speed,noautokill)
 	local seq = issequence and act or self:SelectWeightedSequence(act)
-	
+
 	self.m_DoPosture = {seq,speed or 1,!noautokill}
-	
+
+	if issequence then
+		return select(2, self:LookupSequence(seq))
+	end
+
 	return self:SequenceDuration(seq)
 end
 
