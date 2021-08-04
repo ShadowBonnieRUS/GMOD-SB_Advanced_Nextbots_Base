@@ -477,7 +477,7 @@ end
 	Ret1: bool | Can drop.
 --]]------------------------------------
 function ENT:CanDropWeaponOnDie(wep)
-	return true
+	return !self:HasSpawnFlags(SF_NPC_NO_WEAPON_DROP)
 end
 
 --[[------------------------------------
