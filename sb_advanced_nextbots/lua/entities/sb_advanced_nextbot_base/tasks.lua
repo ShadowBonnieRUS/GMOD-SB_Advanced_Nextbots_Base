@@ -146,7 +146,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:TaskFail
-	Desc: Calls 'OnFail' and 'OnDelete' task callbacks and deletes task. Does nothing if given task not started.
+	Desc: Calls 'OnFail' and 'OnDelete' task callbacks and deletes task. Does nothing if given task is not started.
 	Arg1: any | task | Task name.
 	Ret1: 
 --]]------------------------------------
