@@ -241,16 +241,12 @@ AI_NODE_ZONE_UNIVERSAL	= 2
 AI_NODE_FIRST_ZONE		= 3
 
 PATH_SEGMENT_MOVETYPE_GROUND		= 0
-PATH_SEGMENT_MOVETYPE_FALLINGDOWN	= 1
+PATH_SEGMENT_MOVETYPE_CROUCHING		= 1
 PATH_SEGMENT_MOVETYPE_JUMPING		= 2
-PATH_SEGMENT_MOVETYPE_JUMPINGGAP	= 3
-PATH_SEGMENT_MOVETYPE_LADDERUP		= 4
-PATH_SEGMENT_MOVETYPE_LADDERDOWN	= 5
 
-local MAX_NODES				= 1500
+local MAX_NODES				= 2000
 local AI_MAX_NODE_LINKS		= 30
 local AINET_VERSION_NUMBER	= 37
-local MAX_SEGMENTS			= 128
 
 local NO_NODE				= -1
 local LINK_OFF				= 0
@@ -329,12 +325,48 @@ local function PathCostGenerator(path,from,area,cap)
 	return cost*10
 end
 
-local function TranslateCapToPathSegmentType(cap)
+local function GetCapBetweenNodes(from,to,hull,duckhull,cap)
+	for i=0,from:_NumLinks()-1 do
+		local link = from:_GetLink(i)
+		
+		if link:SrcNode()==from and link:DestNode()==to or link:SrcNode()==to and link:DestNode()==from then
+			if bit.band(link.m_AcceptedMoveTypes[hull],cap)==0 then
+				return link.m_AcceptedMoveTypes[duckhull],true
+			end
+			
+			return link.m_AcceptedMoveTypes[hull],false
+		end
+	end
+end
+
+local function ShouldSkipNodePosition(from,to,pos,isgoal,hull,duckhull,cap)
+	local dist = from:GetOrigin():DistToSqr(to:GetOrigin())
+
+	if !isgoal then
+		if pos:DistToSqr(to:GetOrigin())>dist then
+			return false
+		end
+	else
+		if from:GetOrigin():DistToSqr(pos)>dist then
+			return false
+		end
+	end
+	
+	local curcap,duckonly = GetCapBetweenNodes(from,to,hull,duckhull,cap)
+	
+	if bit.band(curcap,CAP_MOVE_JUMP)!=0 then
+		return false
+	end
+	
+	return true
+end
+
+local function TranslateCapToPathSegmentType(cap,duckonly)
 	if bit.band(cap,CAP_MOVE_JUMP)!=0 then
 		return PATH_SEGMENT_MOVETYPE_JUMPING
 	end
 	
-	return PATH_SEGMENT_MOVETYPE_GROUND
+	return duckonly and PATH_SEGMENT_MOVETYPE_CROUCHING or PATH_SEGMENT_MOVETYPE_GROUND
 end
 
 local function debugoverlay_HorzArrow(startpos,endpos,width,time,color,nodepth)
@@ -460,7 +492,9 @@ local CAI_Node = {
 		
 		for i=0,self.m_NumLinks-1 do
 			local link = self.m_links[i]
+			
 			local neighbor = link:DestNode()
+			if neighbor==self then neighbor = link:SrcNode() end
 			
 			t[#t+1] = neighbor
 		end
@@ -474,7 +508,7 @@ local CAI_Node = {
 		for i=0,self.m_NumLinks-1 do
 			local link = self.m_links[i]
 			
-			if link:DestNode()==neighbor then
+			if link:SrcNode()==self and link:DestNode()==neighbor or link:SrcNode()==neighbor and link:DestNode()==self then
 				local t = {}
 				
 				for j=0,NUM_HULLS-1 do
@@ -498,15 +532,17 @@ local CAI_Node = {
 		
 		for i=0,self:_NumLinks()-1 do
 			local link = self:_GetLink(i)
+			
 			local neighbor = link:DestNode()
+			if neighbor==self then neighbor = link:SrcNode() end
 			
 			NodesLinks[self.m_id.."_"..neighbor:GetID()] = nil
 			NodesLinks[neighbor:GetID().."_"..self.m_id] = nil
 			
 			for j=0,neighbor:_NumLinks()-1 do
-				local link = neighbor:_GetLink(j)
+				local nlink = neighbor:_GetLink(j)
 				
-				if link:DestNode()==self then
+				if link==nlink then
 					for k=j,neighbor:_NumLinks()-1 do
 						neighbor.m_links[k] = Either(k==neighbor:_NumLinks()-1,nil,neighbor.m_links[k+1])
 					end
@@ -547,66 +583,79 @@ local CAI_Link = {
 	DestNode = function(self) return self.dest end,
 	SrcNode = function(self) return self.src end,
 	DestNodeID = function(self) return self.dest:GetID() end,
+	SrcNodeID = function(self) return self.src:GetID() end,
 }
 
 local CAI_DynamicLink = {
 	_initialize = function(self)
-		self.m_state = self:GetLinkState()
+		self.m_SrcEditID = self.dlink:GetInternalVariable("startnode")
+		self.m_DestEditID = self.dlink:GetInternalVariable("endnode")
+		self.m_SrcID = EditOpsInvert[self.m_SrcEditID] or NO_NODE
+		self.m_DestID = EditOpsInvert[self.m_DestEditID] or NO_NODE
+		self.m_LinkState = self.dlink:GetInternalVariable("initialstate")
+		self.m_LinkType = CAP_MOVE_GROUND
+		self.m_AllowUse = self.dlink:GetInternalVariable("AllowUse")
+		self.m_InvertAllow = self.dlink:GetInternalVariable("m_bInvertAllow")
 	
 		DynamicLinks[self] = true
 	end,
 	
-	GetSrcNodeID = function(self) return self.dlink:GetInternalVariable("startnode") end,
-	GetDestNodeID = function(self) return self.dlink:GetInternalVariable("endnode") end,
-	GetStrAllowUse = function(self) return self.dlink:GetInternalVariable("AllowUse") end,
-	GetLinkState = function(self) return self.dlink:GetInternalVariable("initialstate") end,
-	GetLinkType = function(self) return self.dlink:GetInternalVariable("linktype") end,
-	GetInvertAllow = function(self) return self.dlink:GetInternalVariable("m_bInvertAllow") end,
+	GetSrcNodeID = function(self) return self.m_SrcID end,
+	GetDestNodeID = function(self) return self.m_DestID end,
+	GetStrAllowUse = function(self) return self.m_AllowUse end,
+	GetLinkState = function(self) return self.m_LinkState end,
+	GetInvertAllow = function(self) return self.m_InvertAllow end,
 	
 	IsValid = function(self) return IsValid(self.dlink) end,
 	
 	UpdateState = function(self)
-		local state = self:GetLinkState()
+		local state = self.dlink:GetInternalVariable("initialstate")
 		
-		if self.m_state!=state then
-			self.m_state = state
+		if self.m_LinkState!=state then
+			self.m_LinkState = state
 			
-			self:UpdateLinkInfo()
+			self:SetLinkState()
 		end
 	end,
 	
-	UpdateLinkInfo = function(self)
-		local src = EditOpsInvert[self:GetSrcNodeID()]
-		local dest = EditOpsInvert[self:GetDestNodeID()]
-		
-		local srcnode = Nodes[src]
-		local destnode = Nodes[dest]
-		
-		if srcnode and destnode then
-			local link
+	SetLinkState = function(self)
+		if self.m_SrcID==NO_NODE or self.m_DestID==NO_NODE then
+			DevMsg("Dynamic link at "..tostring(self.dlink:GetPos()).." pointing to invalid node ID!!\n")
 			
-			for i=0,srcnode:_NumLinks()-1 do
-				local l = srcnode:_GetLink(i)
-				
-				if l:DestNode()==destnode then
-					link = l
-					break
-				end
-			end
+			return
+		end
+		
+		local srcnode = Nodes[self.m_SrcID]
+		if srcnode then
+			local link = self:FindLink()
 			
-			if !link then
-				DevMsg("Dynamic Link Error: "..tostring(self.dlink).." unable to form between nodes "..src.." and "..dest.."\n")
-			else
+			if link then
 				link.dlink = self
 				
-				if self.m_state==LINK_OFF then
+				if self.m_LinkState==LINK_OFF then
 					link.m_info = bit.bor(link.m_info,bits_LINK_OFF)
 				else
 					link.m_info = bit.band(link.m_info,bit.bnot(bits_LINK_OFF))
 				end
+			else
+				DevMsg("Dynamic Link Error: "..tostring(self.dlink).." unable to form between nodes "..self.m_SrcID.." and "..self.m_DestID.."\n")
 			end
 		end
-	end
+	end,
+	
+	FindLink = function(self)
+		local node = Nodes[self.m_SrcID]
+		
+		if node then
+			for i=0,node:_NumLinks()-1 do
+				local link = node:_GetLink(i)
+				
+				if link:SrcNodeID()==self.m_SrcID and link:DestNodeID()==self.m_DestID or link:SrcNodeID()==self.m_DestID and link:DestNodeID()==self.m_SrcID then
+					return link
+				end
+			end
+		end
+	end,
 }
 
 local SearchList = {
@@ -704,7 +753,7 @@ local PathFollower = {
 		self.AvoidRightTo = Vector()
 	end,
 	
-	_Astar = function(self,start,goal,hull,cap)
+	_Astar = function(self,start,goal,hull,duckhull,cap)
 		local from = GetNearestNode(start)
 		local to = GetNearestNode(goal)
 		
@@ -730,7 +779,7 @@ local PathFollower = {
 			local node = list:PopOpenList()
 			
 			if node==to then
-				return self:_Construct(nodes,from,to,start,goal,hull)
+				return self:_Construct(nodes,from,to,start,goal,hull,duckhull,cap)
 			end
 			
 			list:AddToClosedList(node)
@@ -760,11 +809,18 @@ local PathFollower = {
 				
 				local curcap = link.m_AcceptedMoveTypes[hull]
 				
-				if bit.band(cap,curcap)==0 then continue end
+				if bit.band(cap,curcap)==0 then
+					curcap = link.m_AcceptedMoveTypes[duckhull]
+					
+					if bit.band(cap,curcap)==0 then
+						continue
+					end
+				end
 				
 				local neighbor = link:DestNode()
-				local dist = PathCostGenerator(self,node,neighbor,curcap)
+				if neighbor==node then neighbor = link:SrcNode() end
 				
+				local dist = PathCostGenerator(self,node,neighbor,curcap)
 				if dist<0 then continue end
 				
 				local newcost = list:GetCostSoFar(node)+dist
@@ -789,26 +845,39 @@ local PathFollower = {
 		return false
 	end,
 	
-	_Construct = function(self,nodes,from,to,start,goal,hull)
+	_Construct = function(self,nodes,from,to,start,goal,hull,duckhull,cap)
 		local sequence = {}
 		local curnode = to
 		
 		while nodes[curnode] do
-			local nextnode = nodes[curnode]
-			sequence[nextnode] = {nextnode:GetOrigin(),curnode:GetOrigin(),curnode}
+			local prevnode = nodes[curnode]
+			local curid = #sequence+1
+			
+			sequence[curid] = {prevnode:GetOrigin(),curnode:GetOrigin(),prevnode,curnode,GetCapBetweenNodes(prevnode,curnode,hull,duckhull,cap)}
 			
 			if curnode==to then
-				sequence[nextnode][2] = goal
-				sequence[nextnode][3] = nil
+				if ShouldSkipNodePosition(prevnode,curnode,goal,true,hull,duckhull,cap) then
+					sequence[curid][2] = goal
+					sequence[curid][4] = nil
+				else
+					sequence[curid+1] = sequence[curid]
+					sequence[curid] = {curnode:GetOrigin(),goal,curnode,nil,CAP_MOVE_GROUND}
+					
+					curid = curid+1
+				end
 			end
 			
-			if nextnode==from then
-				sequence[nextnode][1] = start
+			if prevnode==from then
+				if ShouldSkipNodePosition(prevnode,curnode,start,false,hull,duckhull,cap) then
+					sequence[curid][1] = start
+				else
+					sequence[curid+1] = {start,prevnode:GetOrigin(),nil,prevnode,CAP_MOVE_GROUND}
+				end
 				
 				break
 			end
 			
-			curnode = nextnode
+			curnode = prevnode
 		end
 		
 		self.Segments = {}
@@ -818,28 +887,13 @@ local PathFollower = {
 		curnode = from
 		local prevsegment
 		
-		while sequence[curnode] do
-			local data = sequence[curnode]
-			local node = data[3] or curnode
-			local movetype = PATH_SEGMENT_MOVETYPE_GROUND
+		for i=#sequence,1,-1 do
+			local data = sequence[i]
 			
-			if node!=curnode then
-				local cap = CAP_MOVE_GROUND
-			
-				for i=0,curnode:_NumLinks()-1 do
-					local link = curnode:_GetLink(i)
-					
-					if link:DestNode()==node then
-						cap = link.m_AcceptedMoveTypes[hull]
-						break
-					end
-				end
-				
-				movetype = TranslateCapToPathSegmentType(cap)
-			end
+			local curnode = data[3] or data[4]
+			local movetype = TranslateCapToPathSegmentType(data[5],data[6])
 			
 			prevsegment = self:_InsertSegment(data[1],data[2],node,movetype,prevsegment)
-			curnode = data[3]
 		end
 		
 		self.CurSegmentID = 0
@@ -856,6 +910,7 @@ local PathFollower = {
 	
 		local cap = bot:CapabilitiesGet()
 		local hull = bot:GetHullType()
+		local duckhull = bot:GetDuckHullType()
 		local mask = bot:GetSolidMask()
 		local step = bot.loco:GetStepHeight()
 		
@@ -863,16 +918,19 @@ local PathFollower = {
 		local mins,maxs = Vector(bounds[1]),Vector(bounds[2])
 		mins.z = mins.z+step
 		
-		if self:_TrivialPathCheck(self.Start,self.Goal,mask,mins,maxs,step,bot) then
-			self:_ConstructTrivial(self.Start,self.Goal,GetNearestNode(self.Start))
+		local maxs2 = bot.CollisionBounds[2]
+		
+		local trivial,duckonly = self:_TrivialPathCheck(self.Start,self.Goal,mask,mins,maxs,maxs2,step,bot)
+		if trivial then
+			self:_ConstructTrivial(self.Start,self.Goal,GetNearestNode(self.Start),duckonly)
 			
 			return true
 		end
 		
-		return self:_Astar(self.Start,self.Goal,hull,cap)
+		return self:_Astar(self.Start,self.Goal,hull,duckhull,cap)
 	end,
 	
-	_TrivialPathCheck = function(self,start,goal,mask,mins,maxs,height,filter)
+	_TrivialPathCheck = function(self,start,goal,mask,mins,maxs,maxs2,height,filter)
 		local dir = goal-start
 		local len = dir:Length()
 		local step = maxs.x-mins.x
@@ -893,15 +951,15 @@ local PathFollower = {
 			if result.Fraction>=1 then return false end
 		end
 		
-		return true
+		return true,util.TraceHull({start = start,endpos = start+dir*math.max(0,tlen),mins = mins,maxs = maxs2,mask = mask,filter = filter}).Fraction<1
 	end,
 	
-	_ConstructTrivial = function(self,startpos,endpos,node)
+	_ConstructTrivial = function(self,startpos,endpos,node,duckonly)
 		self.Segments = {}
 		self.NumSegments = 0
 		self.Length = 0
 		
-		self:_InsertSegment(startpos,endpos,node,PATH_SEGMENT_MOVETYPE_GROUND)
+		self:_InsertSegment(startpos,endpos,node,duckonly and PATH_SEGMENT_MOVETYPE_CROUCHING or PATH_SEGMENT_MOVETYPE_GROUND)
 		
 		self.CurSegmentID = 0
 		self.CurSegment = self.Segments[0]
@@ -1168,7 +1226,7 @@ local PathFollower = {
 			goalpos = goal.pos
 		end
 		
-		if goal.type==PATH_SEGMENT_MOVETYPE_GROUND then
+		if goal.type==PATH_SEGMENT_MOVETYPE_GROUND or goal.type==PATH_SEGMENT_MOVETYPE_CROUCHING then
 			local forward = goalpos-curpos
 			forward.z = 0
 			
@@ -1261,16 +1319,16 @@ local PathFollower = {
 				
 				local r,g,b = 255,77,0
 				
-				if cur.type==PATH_SEGMENT_MOVETYPE_FALLINGDOWN then
+				if cur.type==PATH_SEGMENT_MOVETYPE_CROUCHING then
 					r,g,b = 255,0,255
 				elseif cur.type==PATH_SEGMENT_MOVETYPE_JUMPING then
 					r,g,b = 0,0,255
-				elseif cur.type==PATH_SEGMENT_MOVETYPE_JUMPINGGAP then
+				/*elseif cur.type==PATH_SEGMENT_MOVETYPE_JUMPINGGAP then
 					r,g,b = 0,255,255
 				elseif cur.type==PATH_SEGMENT_MOVETYPE_LADDERDOWN then
 					r,g,b = 0,255,0
 				elseif cur.type==PATH_SEGMENT_MOVETYPE_LADDERUP then
-					r,g,b = 0,100,0
+					r,g,b = 0,100,0*/
 				end
 				
 				local color = Color(r,g,b)
@@ -1337,29 +1395,22 @@ local function CreateNode(origin,yaw)
 	return node
 end
 
-local function CreateLink(src,dest,movetypes)
-	if src:_NumLinks()>=AI_MAX_NODE_LINKS then ThrowError("CreateLink: Node "..src:GetID().." has too many links") end
-	if dest:_NumLinks()>=AI_MAX_NODE_LINKS then ThrowError("CreateLink: Node "..dest:GetID().." has too many links") end
+local function CreateLink(src,dest)
+	if src==dest then DevMsg("CreateLink: Attempted to link a node to itself") return end
+	if src:_NumLinks()>=AI_MAX_NODE_LINKS then DevMsg("CreateLink: Node "..src:GetID().." has too many links") return end
+	if dest:_NumLinks()>=AI_MAX_NODE_LINKS then DevMsg("CreateLink: Node "..dest:GetID().." has too many links") return end
 	
-	local link1 = new_Link()
-	local link2 = new_Link()
+	local link = new_Link()
 	
-	for i=0,NUM_HULLS-1 do
-		link1.m_AcceptedMoveTypes[i] = movetypes[i]
-		link2.m_AcceptedMoveTypes[i] = movetypes[i]
-	end
+	link.src = src
+	link.dest = dest
 	
-	link1.src = src
-	link1.dest = dest
-	src:_AddLink(link1)
-	
-	link2.src = dest
-	link2.dest = src
-	dest:_AddLink(link2)
+	src:_AddLink(link)
+	dest:_AddLink(link)
 	
 	NodesLinks[src:GetID().."_"..dest:GetID()] = {src:GetID(),dest:GetID(),(src:GetOrigin()+dest:GetOrigin())/2,src:GetOrigin():DistToSqr(dest:GetOrigin())/2}
 	
-	return link1,link2
+	return link
 end
 
 function Load()
@@ -1381,11 +1432,15 @@ function Load()
 		return false
 	end
 	
+	DevMsg("Passed first ver check\n")
+	
 	f:Seek(0)
 	
-	local aiver = f:ReadLong(3)
+	local aiver = f:ReadLong()
+	DevMsg("Got version "..aiver.."\n")
+	
 	if aiver!=AINET_VERSION_NUMBER then
-		DevMsg("AI node graph "..filename.." is out of date (ai net version: "..aiver..")\n")
+		DevMsg("AI node graph "..filename.." is out of date\n")
 		
 		f:Close()
 		return false
@@ -1393,13 +1448,16 @@ function Load()
 	
 	local mapversion = game.GetMapVersion()
 	local mapver = f:ReadLong()
+	DevMsg("Map version "..mapver.."\n")
 	
-	if mapver!=mapversion then
-		DevMsg("AI node graph "..filename.." is out of date (map version changed) (map: "..mapversion..", nodegraph: "..mapver..")\n")
+	if mapver!=mapversion and !GetConVar("g_ai_norebuildgraph"):GetBool() then
+		DevMsg("AI node graph "..filename.." is out of date (map version changed)\n")
 		
-		//f:Close()
-		//return false
+		f:Close()
+		return false
 	end
+	
+	DevMsg("Done version checks\n")
 	
 	local numNodes = f:ReadLong()
 	
@@ -1410,6 +1468,8 @@ function Load()
 		return false
 	end
 	
+	DevMsg("Finishing load\n")
+	
 	for i=0,NodeNum-1 do
 		Nodes[i]:_Remove()
 	end
@@ -1418,7 +1478,6 @@ function Load()
 	
 	for i=1,numNodes do
 		local origin = Vector()
-		
 		origin.x = f:ReadFloat()
 		origin.y = f:ReadFloat()
 		origin.z = f:ReadFloat()
@@ -1441,13 +1500,13 @@ function Load()
 	for i=1,numLinks do
 		local src = Nodes[f:ReadShort()]
 		local dest = Nodes[f:ReadShort()]
-		local movetypes = {}
+		
+		local link = CreateLink(src,dest)
+		local movetypes = link and link.m_AcceptedMoveTypes or {}
 		
 		for j=0,NUM_HULLS-1 do
 			movetypes[j] = f:ReadByte()
 		end
-		
-		CreateLink(src,dest,movetypes)
 	end
 	
 	EditOps,EditOpsInvert = {},{}
@@ -1465,54 +1524,51 @@ function Load()
 	for k,v in ipairs(ents.FindByClass("info_node_link")) do
 		local dlink = new_DynamicLink(v)
 		
-		local src = EditOpsInvert[dlink:GetSrcNodeID()]
-		local dest = EditOpsInvert[dlink:GetDestNodeID()]
-		
-		if !src then
-			DevMsg("Dynamic link source WC node "..dlink:GetSrcNodeID().." not found\n")
+		if dlink.m_SrcID==NO_NODE then
+			DevMsg("Dynamic link source WC node "..dlink.m_SrcEditID.." not found\n")
+			DynamicLinks[dlink] = nil
+			
 			continue
 		end
 		
-		if !dest then
-			DevMsg("Dynamic link dest WC node "..dlink:GetDestNodeID().." not found\n")
+		if dlink.m_DestID==NO_NODE then
+			DevMsg("Dynamic link dest WC node "..dlink.m_DestEditID.." not found\n")
+			DynamicLinks[dlink] = nil
+			
 			continue
 		end
-		
-		local srcnode = Nodes[src]
-		local destnode = Nodes[dest]
 		
 		if bit.band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)!=0 then
-			local link
-		
-			for i=0,srcnode:_NumLinks()-1 do
-				local l = srcnode:_GetLink(i)
-				
-				if l:DestNode()==destnode then
-					link = l
-					break
-				end
-			end
+			local link = dlink:FindLink()
 			
 			if !link then
-				local movetypes = {}
-				for i=0,NUM_HULLS-1 do movetypes[i] = 0 end
+				local srcnode = Nodes[dlink.m_SrcID]
+				local destnode = Nodes[dlink.m_DestID]
 				
-				link = CreateLink(srcnode,destnode,movetypes)
-			end
-			
-			link.dlink = dlink
-			dlink:UpdateLinkInfo()
-		
-			local hullbits = bit.band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)
-			
-			for i=0,NUM_HULLS-1 do
-				if bit.band(hullbits,bit.lshift(1,i))!=0 then
-					link.m_AcceptedMoveTypes[i] = dlink:GetLinkType()
+				if srcnode and destnode then
+					link = CreateLink(srcnode,destnode,movetypes)
+					
+					if !link then
+						DevMsg("Failed to create dynamic link ("..dlink.m_SrcEditID.." <--> "..dlink.m_DestEditID..")\n")
+					end
 				end
 			end
 			
-			dlinks = dlinks+1
+			if link then
+				link.dlink = dlink
+			
+				local hullbits = bit.band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)
+				
+				for i=0,NUM_HULLS-1 do
+					if bit.band(hullbits,bit.lshift(1,i))!=0 then
+						link.m_AcceptedMoveTypes[i] = dlink.m_LinkType
+					end
+				end
+			end
 		end
+		
+		dlink:SetLinkState()
+		dlinks = dlinks+1
 	end
 	
 	DevMsg("NodeGraph loaded successfully. Nodes: "..numNodes..", Links: "..numLinks..", Dynamic Links: "..dlinks.."\n")
@@ -1639,12 +1695,13 @@ timer.Create("sb_anb_nodegraph_drawnodes",1,0,function()
 		debugoverlay.Box(node:GetOrigin(),mins,maxs,1.5,Color(r,g,b,0))
 		
 		if drawtype>1 then
-			debugoverlay.Text(node:GetOrigin()+Vector(0,0,1),node:GetID(),1.5,true)
+			debugoverlay.Text(node:GetOrigin()+Vector(0,0,1),node:GetID().."(WC: "..EditOps[node:GetID()]..")",1.5,true)
 		end
 		
 		for j=0,node:_NumLinks()-1 do
 			local link = node:_GetLink(j)
 			local dest = link:DestNode()
+			if dest==node then dest = link:SrcNode() end
 			
 			if dest:GetID()<node:GetID() then continue end
 			
