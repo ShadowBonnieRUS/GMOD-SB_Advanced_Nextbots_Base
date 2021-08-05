@@ -276,6 +276,12 @@ function ENT:DoPosture(act,issequence,speed,noautokill)
 	
 	self.m_DoPosture = {seq,speed or 1,!noautokill}
 	
+	if issequence and isstring(seq) then
+		local seqid,len = self:LookupSequence(seq)
+		
+		return len
+	end
+	
 	return self:SequenceDuration(seq)
 end
 
@@ -443,8 +449,14 @@ function ENT:ShouldCrouch()
 	else
 		if self.m_Jumping then return true end
 		
-		if !self:UsingNodeGraph() and IsValid(self:GetCurrentNavArea()) and self:GetCurrentNavArea():HasAttributes(NAV_MESH_CROUCH) then
-			return true
+		if !self:UsingNodeGraph() then
+			if IsValid(self:GetCurrentNavArea()) and self:GetCurrentNavArea():HasAttributes(NAV_MESH_CROUCH) then
+				return true
+			end
+		else
+			if self:PathIsValid() and self:GetPath():GetCurrentGoal().type==SBAdvancedNextbotNodeGraph.PATH_SEGMENT_MOVETYPE_CROUCHING then
+				return true
+			end
 		end
 	
 		return self:RunTask("ShouldCrouch") or false
@@ -525,13 +537,11 @@ end
 	Ret1: 
 --]]------------------------------------
 function ENT:OnContact(ent)
-	//print(ent)
-
-	/*local trace = self:GetTouchTrace()		-- Often crashes the game. Waiting for bug report results.
+	local trace = self:GetTouchTrace()
 	
 	if trace.Hit then
 		self:OnTouch(ent,trace)
-	end*/
+	end
 end
 
 --[[------------------------------------
@@ -707,14 +717,14 @@ function ENT:ControlPath(lookatgoal)
 	local pos = self:GetPathPos()
 	local options = self.m_PathOptions
 
-	local range = self:GetRangeTo(pos)
+	local range = self:GetRangeSquaredTo(pos)
 	
-	if range<options.tolerance or range<self.PathGoalToleranceFinal then
+	if range<options.tolerance^2 or range<self.PathGoalToleranceFinal^2 then
 		path:Invalidate()
 		return true
 	end
 	
-	if path:GetAge()>options.recompute then
+	if path:GetAge()>options.recompute and self.loco:IsOnGround() then
 		path:ResetAge()
 		
 		if !self:ComputePath(pos,options.generator) then
@@ -752,7 +762,7 @@ end
 function ENT:Approach(pos)
 	if self.loco:IsOnGround() then
 		self.loco:Approach(pos,1)
-	else
+	elseif !self.m_JumpingToPos then
 		-- In air we using player alike motion, moving with small speed.
 	
 		local dt = self.BehaveInterval
@@ -959,9 +969,9 @@ function ENT:MoveAlongPath(lookatgoal)
 		path:Draw()
 	end
 	
-	local range = self:GetRangeTo(self:GetPathPos())
+	local range = self:GetRangeSquaredTo(self:GetPathPos())
 	
-	if !path:IsValid() and range<=self.m_PathOptions.tolerance or range<self.PathGoalToleranceFinal then
+	if !path:IsValid() and range<=self.m_PathOptions.tolerance^2 or range<self.PathGoalToleranceFinal^2 then
 		path:Invalidate()
 		return true
 	end
@@ -1014,6 +1024,7 @@ end
 function ENT:OnLandOnGround(ent)
 	if self.m_Jumping then
 		self.m_Jumping = false
+		self.m_JumpingToPos = false
 		
 		-- Restoring from jump
 		
@@ -1366,6 +1377,26 @@ function ENT:GetHullType()
 end
 
 --[[------------------------------------
+	Name: NEXTBOT:SetDuckHullType
+	Desc: Sets duck hull type for bot.
+	Arg1: number | type | Hull type. See HULL_* Enums
+	Ret1: 
+--]]------------------------------------
+function ENT:SetDuckHullType(type)
+	self.m_DuckHullType = type
+end
+
+--[[------------------------------------
+	Name: NEXTBOT:GetDuckHullType
+	Desc: Returns hull type for bot.
+	Arg1: 
+	Ret1: number | Hull type. See HULL_* Enums
+--]]------------------------------------
+function ENT:GetDuckHullType()
+	return self.m_DuckHullType
+end
+
+--[[------------------------------------
 	Name: NEXTBOT:JumpToPos
 	Desc: Makes bot jump to given position. Jump height depends on height difference of given position and current position.
 	Arg1: Vector | pos | Position to jump to.
@@ -1391,6 +1422,8 @@ function ENT:JumpToPos(pos,height)
 	
 	self:Jump()
 	self.loco:SetVelocity(Vector(dir.x*dist/t,dir.y*dist/t,(2*g*h1)^0.5))
+	
+	self.m_JumpingToPos = true
 end
 
 hook.Add("OnPhysgunPickup","SBAdvancedNextBots",function(ply,ent)
