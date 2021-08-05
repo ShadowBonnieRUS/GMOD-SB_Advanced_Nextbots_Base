@@ -7,6 +7,8 @@ local EngineAnalogs = {
 	weapon_crossbow = "weapon_crossbow_sb_anb",
 	weapon_rpg = "weapon_rpg_sb_anb",
 	weapon_shotgun = "weapon_shotgun_sb_anb",
+	weapon_crowbar = "weapon_crowbar_sb_anb",
+	weapon_stunstick = "weapon_stunstick_sb_anb",
 }
 
 local EngineAnalogsReverse = {}
@@ -472,7 +474,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:CanDropWeaponOnDie
-	Desc: Decides can bot drop weapon on die. NOTE: Weapon also may not drop even with `true` if weapon's `SWEP:ShouldDropOnDie` returns `false`.
+	Desc: Decides can bot drop weapon on death. NOTE: Weapon also may not drop even with `true` if weapon's `SWEP:ShouldDropOnDie` returns `false`.
 	Arg1: Weapon | wep | Current active weapon (this will be lua analog for engine weapon).
 	Ret1: bool | Can drop.
 --]]------------------------------------
@@ -497,7 +499,7 @@ end
 	Ret1: bool | Weapon is melee weapon.
 --]]------------------------------------
 function ENT:IsMeleeWeapon(wep)
-	wep = wep or self:GetActiveWeapon()
+	wep = wep or self:GetActiveLuaWeapon()
 	
 	return IsValid(wep) and wep.GetCapabilities and bit.band(wep:GetCapabilities(),CAP_WEAPON_MELEE_ATTACK1)!=0 or false
 end
