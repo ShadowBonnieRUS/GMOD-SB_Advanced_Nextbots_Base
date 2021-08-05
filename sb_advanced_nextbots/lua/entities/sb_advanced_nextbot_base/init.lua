@@ -132,8 +132,10 @@ function ENT:Initialize()
 	self.m_StuckTime2 = 0
 	self.m_StuckPos = self:GetPos()
 	self.m_HullType = HULL_HUMAN
+	self.m_DuckHullType = HULL_TINY
 	self.m_PassIsNPCCheck = true
 	self.m_PitchAim = 0
+	self.m_Conditions = {}
 	
 	self.loco:SetGravity(self.DefaultGravity)
 	self.loco:SetAcceleration(self.AccelerationSpeed)
@@ -279,11 +281,12 @@ include("nodegraph_path.lua")
 AddCSLuaFile("tasks.lua")
 include("tasks.lua")
 
+function ENT:SetCondition(condition) self.m_Conditions[condition] = true end
+function ENT:HasCondition(condition) return self.m_Conditions[condition] or false end
+function ENT:ClearCondition(condition) self.m_Conditions[condition] = nil end
+
 -- NPC Stubs
 
-function ENT:SetCondition(condition) end
-function ENT:HasCondition(condition) return false end
-function ENT:ClearCondition(condition) end
 function ENT:ConditionName(condition) return "" end
 
 function ENT:ClearSchedule() end
