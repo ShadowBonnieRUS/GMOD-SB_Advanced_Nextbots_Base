@@ -400,6 +400,7 @@ function ENT:SetupGesturePosture()
 		local wait = self.m_DoGesture[3]
 		self.m_DoGesture = nil
 		
+		local clayer = self.m_CurGesture and self.m_CurGesture[4]
 		self:StopGesture()
 		
 		local layer = self:AddGesture(act)
