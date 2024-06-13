@@ -294,7 +294,7 @@ local function DrawHalo(mat,pos,scale,r,g,b,a)
 	mesh.End()
 end
 
-local mat = Material("sprites/glow04_noz")
+local mat = Material("effects/blueflare1")
 local mat2 = Material("effects/stunstick")
 function SWEP:DrawWorldModel()
 	local wep = self:GetParent()
@@ -303,7 +303,7 @@ function SWEP:DrawWorldModel()
 	local pos = wep:GetAttachment(1).Pos
 	
 	local color = math.Rand(0.5,0.8)*255
-	DrawHalo(mat,pos,math.Rand(4,6)*2,color,color,color,255)
+	DrawHalo(mat,pos,math.Rand(3,5)*2,color,color,color,255)
 	
 	local color = math.Rand(0.9,1)*127
 	DrawHalo(mat2,pos,math.Rand(2,3),color,color,color,255)

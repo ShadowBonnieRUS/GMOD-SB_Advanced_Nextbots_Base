@@ -49,7 +49,7 @@ function SWEP:PrimaryAttack()
 	
 	local owner = self:GetOwner()
 	
-	owner:FireBullets({
+	self:FireBullets({
 		Num = 1,
 		Src = owner:GetShootPos(),
 		Dir = owner:GetAimVector(),
@@ -61,7 +61,7 @@ function SWEP:PrimaryAttack()
 	})
 	
 	self:DoMuzzleFlash()
-	self:GetOwner():EmitSound(Sound("Weapon_357.Single"))
+	self:GetParent():EmitSound(Sound("Weapon_357.Single"))
 	
 	self:SetClip1(self:Clip1()-1)
 	self:SetNextPrimaryFire(CurTime()+0.1)
@@ -83,6 +83,10 @@ function SWEP:DoMuzzleFlash()
 		ef:SetFlags(MUZZLEFLASH_357)
 		util.Effect("MuzzleFlash",ef,false)
 	end
+end
+
+function SWEP:GetTracerOrigin()
+	return self:GetParent():GetAttachment(self:GetParent():LookupAttachment("muzzle")).Pos
 end
 
 if CLIENT then

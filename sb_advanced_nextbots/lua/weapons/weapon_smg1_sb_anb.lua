@@ -50,7 +50,7 @@ function SWEP:PrimaryAttack()
 	
 	local owner = self:GetOwner()
 	
-	owner:FireBullets({
+	self:FireBullets({
 		Num = 1,
 		Src = owner:GetShootPos(),
 		Dir = owner:GetAimVector(),
@@ -63,7 +63,7 @@ function SWEP:PrimaryAttack()
 	})
 	
 	self:DoMuzzleFlash()
-	self:GetOwner():EmitSound(Sound("Weapon_SMG1.NPC_Single"))
+	self:GetParent():EmitSound(Sound("Weapon_SMG1.NPC_Single"))
 	
 	self:SetClip1(self:Clip1()-1)
 	self:SetNextPrimaryFire(CurTime()+0.075)
@@ -85,6 +85,10 @@ function SWEP:DoMuzzleFlash()
 		ef:SetFlags(MUZZLEFLASH_SMG1)
 		util.Effect("MuzzleFlash",ef,false)
 	end
+end
+
+function SWEP:GetTracerOrigin()
+	return self:GetParent():GetAttachment(self:GetParent():LookupAttachment("muzzle")).Pos
 end
 
 if CLIENT then
@@ -113,22 +117,24 @@ function SWEP:SecondaryAttack()
 		return
 	end
 	
-	self:GetOwner():EmitSound(Sound("Weapon_SMG1.Double"))
+	self:GetParent():EmitSound(Sound("Weapon_SMG1.Double"))
 	
-	local pos = self:GetOwner():GetShootPos()
-	local vel = self:GetOwner():GetEyeAngles():Forward()*1000
+	local owner = self:GetOwner()
+	local pos = owner:GetShootPos()
+	local vel = owner:GetEyeAngles():Forward()*1000
 	
 	local grenade = ents.Create("grenade_ar2")
 	grenade:SetPos(pos)
 	grenade:SetVelocity(vel)
 	grenade:SetLocalAngularVelocity(RandomAngle(-400,400))
-	grenade:SetOwner(self:GetOwner())
+	grenade:SetOwner(owner)
 	grenade:Spawn()
-	grenade:SetCustomCollisionCheck(true)
-	
-	hook.Add("ShouldCollide",grenade,function(self,ent1,ent2)
-		if self==ent1 then print(ent2) end
-		if self==ent2 then print(ent1) end
+	grenade:SetSaveValue("m_bIsLive", false)
+	grenade:SetSaveValue("m_fSpawnTime", CurTime())
+	grenade:SetSaveValue("m_hThrower", owner)
+
+	timer.Simple(0.1, function()
+		if grenade:IsValid() then grenade:SetSaveValue("m_bIsLive", true) end
 	end)
 	
 	self:SetNextPrimaryFire(CurTime()+0.5)

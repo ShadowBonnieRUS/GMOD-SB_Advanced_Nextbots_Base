@@ -88,8 +88,10 @@ function ENT:SetupWeapon(wep)
 		actwep:SetClip2(wep:Clip2())
 		
 		hook.Add("Think",actwep,function(self)
-			wep:SetClip1(self:Clip1())
-			wep:SetClip2(self:Clip2())
+			if IsValid(wep) then
+				wep:SetClip1(self:Clip1())
+				wep:SetClip2(self:Clip2())
+			end
 		end)
 		
 		hook.Add("EntityRemoved",actwep,function(self,ent)
@@ -377,7 +379,7 @@ end
 	Ret1: number | Animation duration.
 --]]------------------------------------
 function ENT:DoRangeGesture()
-	local act = self:TranslateActivity(ACT_MP_ATTACK_STAND_PRIMARYFIRE)
+	local act = self:TranslateActivity(self:IsCrouching() and ACT_MP_ATTACK_CROUCH_PRIMARYFIRE or ACT_MP_ATTACK_STAND_PRIMARYFIRE)
 	local seq = self:SelectWeightedSequence(act)
 	
 	self:DoGesture(act)
@@ -392,7 +394,7 @@ end
 	Ret1: number | Animation duration.
 --]]------------------------------------
 function ENT:DoReloadGesture()
-	local act = self:TranslateActivity(ACT_MP_RELOAD_STAND)
+	local act = self:TranslateActivity(self:IsCrouching() and ACT_MP_RELOAD_CROUCH or ACT_MP_RELOAD_STAND)
 	local seq = self:SelectWeightedSequence(act)
 	
 	self:DoGesture(act)

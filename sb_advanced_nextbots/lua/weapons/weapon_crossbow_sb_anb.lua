@@ -71,7 +71,7 @@ function SWEP:FireBolt()
 	
 	self:SetClip1(self:Clip1()-1)
 	
-	self:GetOwner():EmitSound(Sound("Weapon_Crossbow.Single"))
+	self:GetParent():EmitSound(Sound("Weapon_Crossbow.Single"))
 	
 	self:SetNextPrimaryFire(CurTime()+0.75)
 	self:SetNextSecondaryFire(CurTime()+0.75)
@@ -85,8 +85,12 @@ function SWEP:CreateBolt(pos,ang,damage,owner)
 	bolt:SetAngles(ang)
 	bolt:Spawn()
 	bolt:SetOwner(owner)
-	bolt:SetSaveValue("m_hOwnerEntity",owner)
 	bolt:EmitSound(Sound("Weapon_Crossbow.BoltFly"))
+	bolt:SetNotSolid(true)
+
+	timer.Simple(0.03, function()
+		if bolt:IsValid() then bolt:SetNotSolid(false) end
+	end)
 	
 	hook.Add("EntityTakeDamage",bolt,function(self,ent,dmg)
 		if dmg:GetInflictor()!=self then return end

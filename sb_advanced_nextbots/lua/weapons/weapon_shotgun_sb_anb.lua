@@ -49,7 +49,7 @@ function SWEP:PrimaryAttack()
 	
 	local owner = self:GetOwner()
 	
-	owner:FireBullets({
+	self:FireBullets({
 		Num = 8,
 		Src = owner:GetShootPos(),
 		Dir = owner:GetAimVector(),
@@ -62,7 +62,7 @@ function SWEP:PrimaryAttack()
 	})
 	
 	self:DoMuzzleFlash()
-	self:GetOwner():EmitSound(Sound("Weapon_Shotgun.NPC_Single"))
+	self:GetParent():EmitSound(Sound("Weapon_Shotgun.NPC_Single"))
 	
 	self:SetClip1(self:Clip1()-1)
 	self:SetNextPrimaryFire(CurTime()+1)
@@ -85,6 +85,10 @@ function SWEP:DoMuzzleFlash()
 		ef:SetFlags(MUZZLEFLASH_SHOTGUN)
 		util.Effect("MuzzleFlash",ef,false)
 	end
+end
+
+function SWEP:GetTracerOrigin()
+	return self:GetParent():GetAttachment(self:GetParent():LookupAttachment("muzzle")).Pos
 end
 
 if CLIENT then
@@ -114,7 +118,7 @@ function SWEP:SecondaryAttack()
 	})
 	
 	self:DoMuzzleFlash()
-	self:GetOwner():EmitSound(Sound("Weapon_Shotgun.Double"))
+	self:GetParent():EmitSound(Sound("Weapon_Shotgun.Double"))
 	
 	self:SetClip1(self:Clip1()-2)
 	self:SetNextPrimaryFire(CurTime()+1.5)
@@ -132,7 +136,7 @@ function SWEP:OnDrop()
 end
 
 function SWEP:Reload()
-	self:GetOwner():EmitSound(Sound("Weapon_Shotgun.NPC_Reload"))
+	self:GetParent():EmitSound(Sound("Weapon_Shotgun.NPC_Reload"))
 	self:SetClip1(self.Primary.ClipSize)
 end
 

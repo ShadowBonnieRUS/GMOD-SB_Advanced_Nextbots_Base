@@ -30,7 +30,7 @@ local UseNodeGraph = CreateConVar(
 	"sb_advanced_nextbot_soldier_usenodegraph",
 	"0",
 	bit.bor(FCVAR_NEVER_AS_STRING,FCVAR_ARCHIVE),
-	"Should bots use nodegraph or navmesh when finding path",
+	"Should bots use nodegraph instead of navmesh when finding path",
 	0,
 	1
 )
@@ -40,7 +40,7 @@ local UseNodeGraph = CreateConVar(
 --]]------------------------------------
 
 ENT.SpawnHealth = 70
-ENT.PathGoalToleranceFinal = 50
+ENT.PathGoalToleranceFinal = 70
 
 local ENEMY_CLASSES
 
@@ -83,14 +83,23 @@ ENT.TaskList = {
 				
 				if self:RunTask("PreventShooting") then return end
 				
-				local dot = math.Clamp(self:GetEyeAngles():Forward():Dot(dir),0,1)
+				local eyedir = self:GetEyeAngles():Forward()
+				local dot = math.Clamp(eyedir:Dot(dir),0,1)
 				local ang = math.deg(math.acos(dot))
+				local shoot = ang<=25
 				
-				if ang<=25 then
+				if !shoot then
 					local filter = self:GetChildren()
 					filter[#filter+1] = self
-					filter[#filter+1] = enemy
+					
+					local tr = util.TraceLine({start = pos,endpos = pos+eyedir*50,mask = MASK_SHOT,filter = filter})
+					
+					if tr.Hit and self:ShouldBeEnemy(tr.Entity) then
+						shoot = true
+					end
+				end
 				
+				if shoot then
 					if self.LastShootBlocker then
 						if self:IsTaskActive("movement_wait") and CurTime()-data.PassBlockerTime>0.5 then
 							data.PassBlocker(self.LastShootBlocker)
@@ -178,7 +187,7 @@ ENT.TaskList = {
 				task,data = "movement_getweapon",{Wep = findwep}
 			else
 				if IsValid(self.Target) then
-					if self:GetRangeSquaredTo(self.Target)>300*300 or !self:CanSeePosition(self.Target) then
+					if self:GetRangeSquaredTo(self.Target)>100*100 or !self:CanSeePosition(self.Target) then
 						task = "movement_followtarget"
 					elseif self:IsMeleeWeapon() and IsValid(self:GetEnemy()) and self.Target:GetPos():DistToSqr(self:GetEnemy():GetPos())<=300*300 and self:GetRangeSquaredTo(self:GetEnemy())>50*50 then
 						task = "movement_followenemy"
@@ -469,6 +478,8 @@ ENT.InformGroup = "Soldiers"
 
 local ENEMY_FRIENDLY,ENEMY_HOSTILE,ENEMY_MONSTER,ENEMY_NEUTRAL = 0,1,2,3
 ENEMY_CLASSES = {
+	-- HL2
+
 	npc_crow = ENEMY_NEUTRAL,
 	npc_monk = ENEMY_FRIENDLY,
 	npc_pigeon = ENEMY_NEUTRAL,
@@ -515,6 +526,30 @@ ENEMY_CLASSES = {
 	npc_antlion_worker = ENEMY_MONSTER,
 	npc_zombine = ENEMY_MONSTER,
 	npc_hunter = ENEMY_HOSTILE,
+
+	-- HL1
+
+	monster_alien_grunt = ENEMY_MONSTER,
+	monster_alien_slave = ENEMY_MONSTER,
+	monster_human_assassin = ENEMY_HOSTILE,
+	monster_babycrab = ENEMY_MONSTER,
+	monster_bullchicken = ENEMY_MONSTER,
+	monster_alien_controller = ENEMY_MONSTER,
+	monster_gargantua = ENEMY_MONSTER,
+	monster_bigmomma = ENEMY_MONSTER,
+	monster_human_grunt = ENEMY_HOSTILE,
+	monster_headcrab = ENEMY_MONSTER,
+	monster_cockroach = ENEMY_NEUTRAL,
+	monster_turret = ENEMY_HOSTILE,
+	monster_houndeye = ENEMY_MONSTER,
+	monster_miniturret = ENEMY_HOSTILE,
+	monster_nihilanth = ENEMY_MONSTER,
+	monster_scientist = ENEMY_FRIENDLY,
+	monster_barney = ENEMY_FRIENDLY,
+	monster_sentry = ENEMY_HOSTILE,
+	monster_snark = ENEMY_MONSTER,
+	monster_tentacle = ENEMY_MONSTER,
+	monster_zombie = ENEMY_MONSTER,
 }
 
 function ENT:Initialize()
@@ -570,12 +605,16 @@ function ENT:SetupEntityRelationship(ent)
 end
 
 function ENT:BehaviourThink()
-	if self:PathIsValid() and !self:IsControlledByPlayer() and !self:DisableBehaviour() then
+	if !self:IsControlledByPlayer() and !self:DisableBehaviour() then
 		local filter = self:GetChildren()
 		filter[#filter+1] = self
 		
+		if IsValid(self:GetEnemy()) then
+			filter[#filter+1] = self:GetEnemy()
+		end
+		
 		local pos = self:GetShootPos()
-		local endpos = pos+self:GetAimVector()*100
+		local endpos = IsValid(self:GetEnemy()) and self:EntShootPos(self:GetEnemy()) or pos+self:GetEyeAngles():Forward()*100
 		local blocker = self:ShootBlocker(pos,endpos,filter)
 		
 		self.LastShootBlocker = blocker
@@ -603,12 +642,12 @@ function ENT:BehaviourThink()
 	self.OnContactAllowed = true
 end
 
-function ENT:OnContact(ent)
-	if self==ent or !self.OnContactAllowed then return end
-
+function ENT:OnTouch(ent,trace)
+	if !self.OnContactAllowed then return end
+	
 	local vel = ent:GetVelocity()
-
-	if !vel:IsZero() and self:GetTouchTrace().Entity==ent then
+	
+	if !vel:IsZero() and self:GetRelationship(ent)!=D_HT then
 		local pos = self:GetPos()
 		
 		self:Approach(pos+vel:GetNormalized()+(pos-ent:GetPos()):GetNormalized())
@@ -785,5 +824,5 @@ end
 function ENT:SetupDefaultCapabilities()
 	BaseClass.SetupDefaultCapabilities(self)
 
-	self:CapabilitiesAdd(CAP_MOVE_JUMP)
+	self:CapabilitiesAdd(bit.bor(CAP_MOVE_JUMP, CAP_MOVE_CLIMB))
 end

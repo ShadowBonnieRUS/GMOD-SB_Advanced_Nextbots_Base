@@ -6,6 +6,7 @@ SB_ADVANCED_NEXTBOT_MOTIONTYPE_WALK = 3
 SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCH = 4
 SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCHWALK = 5
 SB_ADVANCED_NEXTBOT_MOTIONTYPE_JUMPING = 6
+SB_ADVANCED_NEXTBOT_MOTIONTYPE_LADDER = 7
 
 -- Default movetype acts can be changed
 ENT.MotionTypeActivities = {
@@ -16,7 +17,44 @@ ENT.MotionTypeActivities = {
 	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCH] = ACT_MP_CROUCH_IDLE,
 	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCHWALK] = ACT_MP_CROUCHWALK,
 	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_JUMPING] = ACT_MP_JUMP,
+	[SB_ADVANCED_NEXTBOT_MOTIONTYPE_LADDER] = ACT_MP_JUMP,
 }
+
+-- enum NavTraverseType game/server/nav.h
+local GO_NORTH			= 0
+local GO_EAST			= 1
+local GO_SOUTH			= 2
+local GO_WEST			= 3
+local GO_LADDER_UP		= 4
+local GO_LADDER_DOWN	= 5
+local GO_JUMP			= 6
+local GO_ELEVATOR_UP	= 7
+local GO_ELEVATOR_DOWN	= 8
+
+-- enum SegmentType NextBot/Path/NextBotPath.h
+local ON_GROUND		= 0
+local DROP_DOWN		= 1
+local CLIMB_UP		= 2
+local JUMP_OVER_GAP	= 3
+local LADDER_UP		= 4
+local LADDER_DOWN	= 5
+
+local Ladders, LaddersUpdate = {}, nil
+local function UpdateLadders()
+	if LaddersUpdate and CurTime() - LaddersUpdate < 30 then return end
+
+	Ladders, LaddersUpdate = {}, CurTime()
+	local ladders = {}
+
+	for k, v in ipairs(navmesh.GetAllNavAreas()) do
+		for _, ladder in ipairs(v:GetLadders()) do
+			if !ladders[ladder] then
+				ladders[ladder] = true
+				Ladders[#Ladders + 1] = ladder
+			end
+		end
+	end
+end
 
 --[[------------------------------------
 	Name: NEXTBOT:SetMotionType
@@ -97,7 +135,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:SetupMotionType()
-	Desc: (INTERNAL) Called to setup motion type сonsidering motion speed and NEXTBOT:IsCrouching.
+	Desc: (INTERNAL) Called to setup motion type сonsidering bot state.
 	Arg1: 
 	Ret1: 
 --]]------------------------------------
@@ -107,6 +145,8 @@ function ENT:SetupMotionType()
 	
 	if self:IsJumping() then
 		type = SB_ADVANCED_NEXTBOT_MOTIONTYPE_JUMPING
+	elseif self:IsUsingLadder() then
+		type = SB_ADVANCED_NEXTBOT_MOTIONTYPE_LADDER
 	elseif self:IsCrouching() then
 		type = moving and SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCHWALK or SB_ADVANCED_NEXTBOT_MOTIONTYPE_CROUCH
 	elseif moving then
@@ -144,6 +184,13 @@ function ENT:GetDesiredEyeAngles()
 	return self.m_DesiredEyeAngles or angle_zero
 end
 
+local function IsAngleEqual(ang1, ang2)
+	return
+		math.abs(math.AngleDifference(ang1.p, ang2.p)) < 0.01 &&
+		math.abs(math.AngleDifference(ang1.y, ang2.y)) < 0.01 &&
+		math.abs(math.AngleDifference(ang1.r, ang2.r)) < 0.01
+end
+
 --[[------------------------------------
 	Name: NEXTBOT:SetupEyeAngles
 	Desc: (INTERNAL) Aiming bot to desired direction.
@@ -170,9 +217,16 @@ function ENT:SetupEyeAngles()
 	
 	angp = angp+diffp
 	angy = angy+diffy
+
+	local newang = Angle(0, angy, 0)
 	
-	self:SetAngles(Angle(0,angy,0))
-	
+	if !IsAngleEqual(self:GetAngles(), newang) then
+		self:SetAngles(newang)
+		
+		local phys = self:GetPhysicsObject()
+		if phys:IsValid() && !IsAngleEqual(phys:GetAngles(), angle_zero) then phys:SetAngles(angle_zero) end
+	end
+
 	self.m_PitchAim = angp
 	self:SetPoseParameter("aim_pitch",self.m_PitchAim+punch.p)
 	self:SetPoseParameter("aim_yaw",punch.y)
@@ -239,7 +293,7 @@ end
 function ENT:SetupActivity()
 	local curact = self:GetActivity()
 	local act = self:RunTask("GetDesiredActivity")
-	
+
 	if !act then
 		act = self.MotionTypeActivities[self:GetMotionType()]
 		act = self:TranslateActivity(act)
@@ -258,8 +312,8 @@ end
 	Arg3: (optional) bool | wait | Should behaviour be stopped while gesture active (like DoPosture).
 	Ret1: 
 --]]------------------------------------
-function ENT:DoGesture(act,speed,wait)
-	self.m_DoGesture = {act,speed or 1,wait}
+function ENT:DoGesture(act, speed, wait)
+	self.m_DoGesture = {act, speed or 1, wait}
 end
 
 --[[------------------------------------
@@ -352,8 +406,12 @@ function ENT:SetupGesturePosture()
 		self:SetLayerPlaybackRate(layer,spd)
 		self:SetLayerBlendIn(layer,0.2)
 		self:SetLayerBlendOut(layer,0.2)
+
+		if clayer and self:IsValidLayer(clayer) and self:GetLayerSequence(clayer) == self:GetLayerSequence(layer) then
+			self:SetLayerWeight(clayer, 0)
+		end
 		
-		self.m_CurGesture = {act,CurTime()+self:GetLayerDuration(layer),wait}
+		self.m_CurGesture = {act,CurTime()+self:GetLayerDuration(layer),wait, layer}
 	end
 	
 	if self.m_DoPosture then
@@ -387,12 +445,82 @@ function ENT:BodyUpdate()
 	end
 	
 	if self:IsMoving() then
-		self:BodyMoveXY()
+		self:BodyMoveXY()		
 	else
-		self:FrameAdvance(0)
+		self:FrameAdvance()
 	end
-	
+
 	self:RunTask("BodyUpdate")
+end
+
+--[[------------------------------------
+	Name: NEXTBOT:LocomotionUpdate
+	Desc: Called to update bot's locomotion parameters. This is a NextBotGroundLocomotion::Update analog, because gmod doesn't give locomotion hook like BodyUpdate or BehaveUpdate
+	Arg1: number | interval | Update interval
+	Ret1: 
+--]]------------------------------------
+function ENT:LocomotionUpdate(interval)
+	self:UpdatePhysicsObject()
+
+	if self.m_FallPostVelocity then
+		-- Seems landing on ground sets our velocity to 0, so restore it here
+
+		self.loco:SetVelocity(self.m_FallPostVelocity)
+		self.m_FallPostVelocity = nil
+	end
+
+	if self.m_Physguned then
+		self.loco:SetVelocity(vector_origin)
+	end
+
+	local ladder = self.m_Ladder
+	if !ladder then
+		if self.CanUseLadder then
+			local dir = self.loco:GetVelocity()
+			local len = dir:Length2D()
+
+			if len >= 1 then
+				UpdateLadders()
+
+				if #Ladders > 0 then
+					local curpos = self:GetPos()
+					local step = self.StepHeight
+					local width = self:GetHullWidth() / 2
+					dir:Normalize()
+
+					for l = 1, #Ladders do
+						local ladder = Ladders[l]
+						local dot = dir:Dot(ladder:GetNormal())
+
+						if dot < -0.5 and curpos.z > ladder:GetBottom().z - step and curpos.z < ladder:GetTop().z - step and util.DistanceToLine(ladder:GetBottom(), ladder:GetTop(), curpos) < ladder:GetWidth() + width then
+							self:AttachToLadder(ladder)
+							break
+						end
+					end
+				end
+			end
+		end
+	else
+		local pos = self:GetPos()
+
+		if !self.m_LadderJustAttached then
+			if pos.z < ladder.Bottom.z || pos.z > ladder.Top.z || util.DistanceToLine(ladder.Bottom, ladder.Top, pos) > self:GetHullWidth() / 2 then
+				self:DetachFromLadder()
+			else
+				local goal = self.m_LadderApproach
+
+				self.loco:SetVelocity(goal and (goal - pos) / interval or vector_origin)
+				self.loco:SetStepHeight(1)
+			end
+		end
+
+		self.m_LadderApproach = nil
+		self.m_LadderJustAttached = nil
+	end
+
+	self:SetupSpeed()
+	self:SetupMotionType()
+	self:ProcessFootsteps()
 end
 
 --[[------------------------------------
@@ -450,11 +578,17 @@ function ENT:ShouldCrouch()
 		if self.m_Jumping then return true end
 		
 		if !self:UsingNodeGraph() then
-			if IsValid(self:GetCurrentNavArea()) and self:GetCurrentNavArea():HasAttributes(NAV_MESH_CROUCH) then
+			if self:PathIsValid() and !self:IsMoving() then
+				local prev = self:GetPath():PriorSegment()
+
+				if prev and prev.area:HasAttributes(NAV_MESH_CROUCH) then
+					return true
+				end
+			elseif IsValid(self:GetCurrentNavArea()) and self:GetCurrentNavArea():HasAttributes(NAV_MESH_CROUCH) then
 				return true
 			end
 		else
-			if self:PathIsValid() and self:GetPath():GetCurrentGoal().type==SBAdvancedNextbotNodeGraph.PATH_SEGMENT_MOVETYPE_CROUCHING then
+			if self:PathIsValid() and self:GetPath():GetCurrentGoal().type == SBAdvancedNextbotNodeGraph.PATH_SEGMENT_MOVETYPE_CROUCHING then
 				return true
 			end
 		end
@@ -503,6 +637,18 @@ function ENT:SetupCollisionBounds()
 end
 
 --[[------------------------------------
+	Name: NEXTBOT:GetHullWidth
+	Desc: Returns collision hull width
+	Arg1: (optional) bool | average | Use average of x and y
+	Ret1: number | Width
+--]]------------------------------------
+function ENT:GetHullWidth(average)
+	local mins, maxs = self:GetCollisionBounds()
+
+	return average and math.sqrt((maxs.x - mins.x) ^ 2 + (maxs.y - mins.y) ^ 2) or maxs.x - mins.x
+end
+
+--[[------------------------------------
 	Name: NEXTBOT:UpdatePhysicsObject
 	Desc: (INTERNAL) Updates physics object position and angles.
 	Arg1: 
@@ -512,11 +658,16 @@ function ENT:UpdatePhysicsObject()
 	local phys = self:GetPhysicsObject()
 	
 	if IsValid(phys) then
-		phys:SetAngles(angle_zero)
+		if !IsAngleEqual(phys:GetAngles(), angle_zero) then
+			phys:SetAngles(angle_zero)
+		end
 	
-		phys:UpdateShadow(self:GetPos(),angle_zero,self.BehaveInterval)
+		local pos = self:GetPos()
+		phys:UpdateShadow(pos, angle_zero, self.BehaveInterval)
 		
-		phys:SetPos(self:GetPos())
+		if phys:GetPos() != pos then
+			phys:SetPos(pos)
+		end
 	end
 end
 
@@ -552,6 +703,22 @@ end
 	Ret1: 
 --]]------------------------------------
 function ENT:OnTouch(ent,trace)
+end
+
+--[[------------------------------------
+	Name: NEXTBOT:UpdateGravity
+	Desc: (INTERNAL) Updates bot's gravity.
+	Arg1: 
+	Ret1: 
+--]]------------------------------------
+function ENT:UpdateGravity()
+	local gravity = self.DefaultGravity
+
+	if self.m_Physguned || self.m_Ladder then
+		gravity = 0
+	end
+
+	self.loco:SetGravity(gravity)
 end
 
 --[[------------------------------------
@@ -610,6 +777,7 @@ function ENT:NavMeshPathCostGenerator(path,area,from,ladder,elevator,len)
 	if !IsValid(from) then return 0 end
 	if !self.loco:IsAreaTraversable(area) then return -1 end
 	if !self.CanCrouch and area:HasAttributes(NAV_MESH_CROUCH) then return -1 end
+	if !self.CanUseLadder and ladder then return -1 end
 	
 	local dist = 0
 	
@@ -630,8 +798,8 @@ function ENT:NavMeshPathCostGenerator(path,area,from,ladder,elevator,len)
 	end
 	
 	local cost = dist+from:GetCostSoFar()
-	
-	local deltaZ = from:ComputeAdjacentConnectionHeightChange(area)
+	local deltaZ = ladder and 0 or from:ComputeAdjacentConnectionHeightChange(area)
+
 	if deltaZ>=self.loco:GetStepHeight() then
 		if deltaZ>=self.loco:GetMaxJumpHeight() then return -1 end
 
@@ -692,7 +860,7 @@ end
 --]]------------------------------------
 function ENT:ComputePath(pos,generator)
 	local path = self:GetPath()
-	
+
 	if path:Compute(self,pos,generator) then
 		local ang = self:GetAngles()
 		path:Update(self)
@@ -716,19 +884,21 @@ function ENT:ControlPath(lookatgoal)
 	local path = self:GetPath()
 	local pos = self:GetPathPos()
 	local options = self.m_PathOptions
+	
+	if !self.m_Ladder then
+		local range = self:GetRangeSquaredTo(pos)
 
-	local range = self:GetRangeSquaredTo(pos)
+		if range<options.tolerance^2 or range<self.PathGoalToleranceFinal^2 then
+			path:Invalidate()
+			return true
+		end
 	
-	if range<options.tolerance^2 or range<self.PathGoalToleranceFinal^2 then
-		path:Invalidate()
-		return true
-	end
-	
-	if path:GetAge()>options.recompute and self.loco:IsOnGround() then
-		path:ResetAge()
-		
-		if !self:ComputePath(pos,options.generator) then
-			return false
+		if path:GetAge()>options.recompute and self.loco:IsOnGround() then
+			path:ResetAge()
+			
+			if !self:ComputePath(pos,options.generator) then
+				return false
+			end
 		end
 	end
 	
@@ -760,40 +930,153 @@ end
 	Ret1:
 --]]------------------------------------
 function ENT:Approach(pos)
-	if self.loco:IsOnGround() then
-		self.loco:Approach(pos,1)
-	elseif !self.m_JumpingToPos then
-		-- In air we using player alike motion, moving with small speed.
-	
-		local dt = self.BehaveInterval
-		local maxspd = math.min(50,self.m_Speed)
-		local dir = pos-self:GetPos()
-		dir.z = 0
+	if self.m_Ladder then
+		local curpos = self:GetPos()
+		local dir = pos - curpos
+		dir:Normalize()
 		
-		local ang = dir:Angle()
-		local vel = self.loco:GetVelocity()
-		vel = WorldToLocal(vel,angle_zero,vector_origin,ang)
+		local up = dir.z * self.LadderClimbSpeed * self.BehaveInterval
+
+		local ladderdir = self.m_Ladder.Top - self.m_Ladder.Bottom
+		local length = ladderdir:Length()
+		ladderdir:Normalize()
+
+		local fr = (curpos.z - self.m_Ladder.Bottom.z) / (self.m_Ladder.Top.z - self.m_Ladder.Bottom.z)
+		local newfr = (fr * length + up) / length
+
+		pos = self.m_Ladder.Bottom + (self.m_Ladder.Top - self.m_Ladder.Bottom) * newfr
+
+		local filter = self:GetChildren()
+		filter[#filter + 1] = self
+
+		local mins, maxs = self:GetCollisionBounds()
+		local tr = util.TraceHull({start = curpos, endpos = pos, mins = mins, maxs = maxs, mask = self:GetSolidMask(), filter = filter})
+
+		self.m_LadderApproach = pos
+	else
+		if !self:UsingNodeGraph() then
+			UpdateLadders()
+
+			local curpos = self:GetPos()
+			local width = self:GetHullWidth() / 2
+			local dir = pos - curpos
+			dir:Normalize()
+
+			for l = 1, #Ladders do
+				local ladder = Ladders[l]
+				local dot = dir:Dot(ladder:GetNormal())
+
+				if dot < 0 and curpos.z > ladder:GetBottom().z + 1 and curpos.z < ladder:GetTop().z - 1 and util.DistanceToLine(ladder:GetBottom(), ladder:GetTop(), curpos) < ladder:GetWidth() + width then
+					self:AttachToLadder(ladder)
+					return
+				end
+			end
+		end
+
+		if self.loco:IsOnGround() then
+			self.loco:Approach(pos,1)
+		elseif !self.m_JumpingToPos then
+			-- In air we using player alike motion, moving with small speed.
 		
-		if vel.x<maxspd then
-			if vel.x<0 then
-				vel.x = vel.x+self.loco:GetDeceleration()*dt
-			else
-				vel.x = vel.x+self.loco:GetAcceleration()*dt
+			local dt = self.BehaveInterval
+			local maxspd = math.min(50,self.m_Speed or 0)
+			local dir = pos-self:GetPos()
+			dir.z = 0
+			
+			local ang = dir:Angle()
+			local vel = self.loco:GetVelocity()
+			vel = WorldToLocal(vel,angle_zero,vector_origin,ang)
+			
+			if vel.x<maxspd then
+				if vel.x<0 then
+					vel.x = vel.x+self.loco:GetDeceleration()*dt
+				else
+					vel.x = vel.x+self.loco:GetAcceleration()*dt
+				end
+				
+				vel.x = math.min(vel.x,maxspd)
 			end
 			
-			vel.x = math.min(vel.x,maxspd)
+			local decy = self.loco:GetDeceleration()*dt
+			if math.abs(vel.y)>decy then
+				vel.y = vel.y>0 and vel.y-decy or vel.y+decy
+			else
+				vel.y = 0
+			end
+			
+			vel = LocalToWorld(vel,angle_zero,vector_origin,ang)
+			self.loco:SetVelocity(vel)
 		end
-		
-		local decy = self.loco:GetDeceleration()*dt
-		if math.abs(vel.y)>decy then
-			vel.y = vel.y>0 and vel.y-decy or vel.y+decy
-		else
-			vel.y = 0
-		end
-		
-		vel = LocalToWorld(vel,angle_zero,vector_origin,ang)
-		self.loco:SetVelocity(vel)
 	end
+end
+
+--[[------------------------------------
+	Name: NEXTBOT:AttachToLadder
+	Desc: (INTERNAL) Attaches bot to ladder. Enabled motion on ladder
+	Arg1: CNavLadder | ladder | Ladder to move on. Can be table with custom ladder info:
+		`bottom` - bottom position of ladder
+		`top` - top position of ladder
+		`normal` - normal of plane of ladder
+	Ret1:
+--]]------------------------------------
+function ENT:AttachToLadder(ladder)
+	if !ladder then return self:DetachFromLadder() end
+
+	local navladder = type(ladder) == "CNavLadder"
+
+	local bottom = navladder and ladder:GetBottom() or ladder.bottom
+	local top = navladder and ladder:GetTop() or ladder.top
+	local normal = navladder and ladder:GetNormal() or ladder.normal
+	local width = self:GetHullWidth(true)
+
+	self.m_Ladder = {Bottom = bottom + normal * width * 0.5, Top = top + normal * width * 0.5, Normal = normal}
+	self.m_LadderApproach = nil
+	self.m_LadderJustAttached = true
+
+	self.m_Jumping = false
+	self.m_JumpingToPos = false
+
+	local len = self.m_Ladder.Top.z - self.m_Ladder.Bottom.z
+	local fr = math.Clamp(math.Clamp(self:GetPos().z - self.m_Ladder.Bottom.z, self.StepHeight, len - self.StepHeight) / len, 0, 1)
+	local mount = self.m_Ladder.Bottom + (self.m_Ladder.Top - self.m_Ladder.Bottom) * fr
+
+	self.loco:SetStepHeight(1)
+	self:UpdateGravity()
+
+	if self.loco:IsOnGround() then
+		self.loco:Jump()
+	end
+
+	self.loco:SetVelocity((mount - self:GetPos()) / self.BehaveInterval)
+end
+
+--[[------------------------------------
+	Name: NEXTBOT:DetachFromLadder
+	Desc: (INTERNAL) Detaches bot from ladder. Returns normal motion
+	Arg1: 
+	Ret1:
+--]]------------------------------------
+function ENT:DetachFromLadder()
+	self.m_Ladder = nil
+	self.m_LadderApproach = nil
+	self.m_LadderJustAttached = nil
+
+	self.loco:SetStepHeight(self.StepHeight)
+	self:UpdateGravity()
+
+	if self:PathIsValid() and !self:UsingNodeGraph() and self:GetPath():GetCurrentGoal().ladder then
+		self:GetPath():Update(self)
+	end
+end
+
+--[[------------------------------------
+	Name: NEXTBOT:IsUsingLadder
+	Desc: Returns is bot using ladder now or not
+	Arg1: 
+	Ret1: boolean | Using ladder or not
+--]]------------------------------------
+function ENT:IsUsingLadder()
+	return self.m_Ladder and true or false
 end
 
 --[[------------------------------------
@@ -804,64 +1087,6 @@ end
 --]]------------------------------------
 function ENT:GetPathPos()
 	return self.m_PathPos
-end
-
-local function GetJumpBlockState(self,dir)
-	-- Returns state of jump block (nil - clear; true - should step back to jump correctly; false - can't reach goal, fully blocked)
-
-	local pos = self:GetPos()
-	local b1,b2 = self:GetCollisionBounds()
-	local step = self.loco:GetStepHeight()
-	
-	b1.x = b1.x/2
-	b1.y = b1.y/2
-	b2.x = b2.x/2
-	b2.y = b2.y/2
-	
-	b1.z = b1.z+step
-	
-	local tr = {}
-	local t = {
-		start = pos,
-		endpos = pos+dir*(b2.x-b1.x),
-		mins = b1,
-		maxs = b2,
-		filter = self,
-		mask = self:GetSolidMask(),
-		collisiongroup = self:GetCollisionGroup(),
-		output = tr,
-	}
-	
-	util.TraceHull(t)
-	
-	if tr.Hit then
-		local maxjump = self.MaxJumpToPosHeight-step
-		local bounds = self.CanCrouch and self.CrouchCollisionBounds or self.CollisionBounds
-		
-		local bsize = bounds[2].z-bounds[1].z
-		local z = b1.z-step
-	
-		local i = step
-		
-		while i<=maxjump do
-			b1.z = z+i
-			b2.z = b1.z+bsize
-			
-			util.TraceHull(t)
-			
-			if !tr.Hit then
-				return true
-			end
-		
-			if i==maxjump then break end
-			
-			i = math.min(i+bsize,maxjump)
-		end
-		
-		return false
-	end
-	
-	return nil
 end
 
 --[[------------------------------------
@@ -885,84 +1110,100 @@ function ENT:MoveAlongPath(lookatgoal)
 	
 	local pos = self:GetPos()
 	local dontupdate = false
-	
-	local jumptype = segment.type==2
-	if jumptype and self:GetRangeTo(segment.pos)<path:GetGoalTolerance() then
-		-- Using previous segment data, because segment with type 2 can't be used properly
-	
-		local prev
-	
-		for k,v in ipairs(path:GetAllSegments()) do
-			if prev and prev.pos==segment.pos then
-				segment = v
-				
-				break
-			end
-		
-			prev = v
-		end
-	end
-	
-	if self:PathIsValid() and !self:UsingNodeGraph() and self.loco:IsOnGround() and segment.pos.z-pos.z<self.MaxJumpToPosHeight then
-		-- Jump support for navmesh PathFollower
-	
-		local area = self:GetCurrentNavArea()
-	
-		if !IsValid(area) or !area:HasAttributes(NAV_MESH_NO_JUMP) and !area:HasAttributes(NAV_MESH_STAIRS) then		
-			local dir = segment.pos-pos
-			dir.z = 0
-			dir:Normalize()
-			
-			local jumpstate = GetJumpBlockState(self,dir)
-			
-			self.m_PathJumpTime = self.m_PathJumpTime or CurTime()
-			if jumpstate==nil then
-				self.m_PathJumpTime = CurTime()
-			end
-			
-			if
-				jumptype or																-- jump segment
-				area:HasAttributes(NAV_MESH_JUMP) or									-- jump area
-				jumpstate and CurTime()-self.m_PathJumpTime>self.PathStuckJumpTime or	-- founded obstacle, can be jumped and seems we stuck
-				jumpstate==nil and self.m_PathJump										-- we are back enough to jump
-			then
-				if jumpstate then
-					-- We are too close to obstacle, should step back
-				
-					self.m_PathJump = true
-					
-					self:Approach(pos-dir*100)
-				else
-					-- Performing jump
-				
-					self.m_PathJump = false
-				
-					self:JumpToPos(segment.pos)
-					
-					local ang = self:GetAngles()
-					path:Update(self)
-					self:SetAngles(ang)
-				end
-				
-				-- Trying deal with jump, don't update path
+
+	if !self:UsingNodeGraph() then
+		-- Ladder support for navmesh PathFollower
+		if segment.ladder && (segment.how == GO_LADDER_UP || segment.how == GO_LADDER_DOWN) then
+			local ladder = self.m_Ladder
+
+			if ladder then
 				dontupdate = true
+				
+				self:Approach(pos + Vector(0, 0, segment.how == GO_LADDER_UP and 1 or -1))
+				self:SetDesiredEyeAngles((segment.how == GO_LADDER_UP and ladder.Top - ladder.Bottom or ladder.Bottom - ladder.Top):Angle())
+			else
+				local ladderstart = segment.how == GO_LADDER_UP and segment.ladder:GetBottom() or segment.ladder:GetTop()
+				local ladderend = segment.how == GO_LADDER_UP and segment.ladder:GetTop() or segment.ladder:GetBottom()
+				local nearend = math.abs(pos.z - ladderend.z) < math.abs(pos.z - ladderstart.z)
+				local dest = nearend and path:NextSegment().pos or ladderstart + segment.ladder:GetNormal() * self:GetHullWidth(true) / 2
+
+				if !nearend then
+					local range = (dest - pos):Length2D()
+
+					if range < 50 + self.loco:GetDesiredSpeed() then
+						dontupdate = true
+
+						if range < 5 then
+							self:AttachToLadder(segment.ladder)
+
+							self:SetPos(dest)
+							self:Approach(ladderend)
+						else
+							self:Approach(dest)
+						end
+					end
+				else
+					self:Approach(dest)
+				end
+			end
+		else
+			if self.m_Ladder then
+				self:DetachFromLadder()
+			end
+
+			local prev = path:PriorSegment()
+
+			-- Jump support for navmesh PathFollower
+			if (segment.how == GO_JUMP or segment.how <= GO_WEST and prev and prev.area:HasAttributes(NAV_MESH_JUMP)) and self.loco:IsOnGround() and self.loco:GetJumpHeight() > 0 then
+				local dojump = true
+				local deltaz = segment.pos.z - pos.z
+
+				if deltaz <= 0 && (segment.pos - pos):Length2DSqr() < path:GetGoalTolerance() ^ 2 then
+					dojump = false
+				elseif deltaz < self.loco:GetStepHeight() && self:GetRangeSquaredTo(segment.pos) < path:GetGoalTolerance() ^ 2 then
+					dojump = false
+				end
+
+				//debugoverlay.Box(segment.pos, Vector(1,1,1)*-15,Vector(1,1,1)*15,0.3,dojump and Color(100, 100, 255, 100) or Color(255, 255, 100, 100))
+				
+				if dojump then
+					local result = self:CalcJumpHeightOverObstacles(segment.pos)
+					
+					if isnumber(result) then
+						self:JumpToPos(segment.pos, result)
+
+						local ang = self:GetAngles()
+						path:Update(self)
+						self:SetAngles(ang)
+					elseif result == true then
+						local dir = pos - segment.pos
+						dir.z = 0
+						dir:Normalize()
+
+						self:Approach(pos + dir * 100)
+					else
+						// We failed to calc jump height, don't move to prevent stuck or something
+					end
+
+					dontupdate = true
+				end
 			end
 		end
 	end
 	
-	if !dontupdate and self.loco:IsOnGround() then
-		local ang = self:GetAngles()
-		path:Update(self)
-		self:SetAngles(ang)
-		
-		local phys = self:GetPhysicsObject()
-		if IsValid(phys) then
-			phys:SetAngles(angle_zero)
+	if !dontupdate then
+		if self.loco:IsOnGround() or self.m_Ladder then
+			local ang = self:GetAngles()
+			path:Update(self)
+			self:SetAngles(ang)
+			
+			local phys = self:GetPhysicsObject()
+			if IsValid(phys) then
+				phys:SetAngles(angle_zero)
+			end
+		else
+			self:Approach(segment.pos)
 		end
-	end
-	
-	if !self.loco:IsOnGround() then
-		self:Approach(segment.pos)
 	end
 	
 	if self.DrawPath:GetBool() then
@@ -986,19 +1227,24 @@ end
 	Ret1: 
 --]]------------------------------------
 function ENT:Jump()
+	if self.m_Ladder then
+		self:DetachFromLadder()
+	end
+
 	if !self.loco:IsOnGround() then return end
 
 	local vel = self.loco:GetVelocity()
-	vel.z = (2*self.loco:GetGravity()*self.JumpHeight)^0.5
+	vel.z = math.sqrt(2 * self.loco:GetGravity() * self.JumpHeight)
 	local pos = self:GetPos()
 	local b1,b2 = self:GetCollisionBounds()
 	
 	self.loco:Jump()
 	self.loco:SetVelocity(vel)
-	//self:SetPos(util.TraceHull({start = pos,endpos = pos+Vector(0,0,self.StepHeight),mask = self:GetSolidMask(),mins = b1,maxs = b2,filter = self}).HitPos)
+
+	//self.loco:SetStepHeight(1) // Should help with teleporting on landing
+	// Breaks landing physics when crouching
 	
 	self:SetupActivity()
-	
 	self:SetupCollisionBounds()
 	self:MakeFootstepSound(1)
 	
@@ -1009,7 +1255,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:IsJumping
-	Desc: Bot is not on ground because he jump.
+	Desc: Bot is not on ground because of jump.
 	Arg1: 
 	Ret1: bool | Bot is jumped
 --]]------------------------------------
@@ -1027,6 +1273,8 @@ function ENT:OnLandOnGround(ent)
 		self.m_JumpingToPos = false
 		
 		-- Restoring from jump
+
+		self.loco:SetStepHeight(self.StepHeight)
 		
 		if !self:IsPostureActive() then
 			self:SetupActivity()
@@ -1034,13 +1282,15 @@ function ENT:OnLandOnGround(ent)
 		
 		self:SetupCollisionBounds()
 	end
+
+	self.m_FallPostVelocity = self.loco:GetVelocity()
 	
 	local fallspeed = self.m_FallSpeed
-	if fallspeed>=300 then
+	if fallspeed >= 300 then
 		local layer = self:AddGesture(self:TranslateActivity(ACT_LAND))
 		self:SetLayerPlaybackRate(layer,1)
 		
-		if fallspeed>=530 then
+		if fallspeed >= 530 then
 			self:MakeFootstepSound(1)
 			
 			self:EmitSound("Player.FallDamage",75,math.random(90,110),0.75)
@@ -1188,7 +1438,7 @@ function ENT:MakeFootstepSound(volume,surface)
 		filter:AddPAS(pos)
 		
 		if !self:OnFootstep(pos,foot,sound,volume,filter) then
-			self:EmitSound(sound,75,100,volume,CHAN_BODY)
+			self:EmitSound(sound,75,100,volume,CHAN_BODY, 0, 0, filter)
 		end
 	end
 end
@@ -1388,7 +1638,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:GetDuckHullType
-	Desc: Returns hull type for bot.
+	Desc: Returns duck hull type for bot.
 	Arg1: 
 	Ret1: number | Hull type. See HULL_* Enums
 --]]------------------------------------
@@ -1397,31 +1647,180 @@ function ENT:GetDuckHullType()
 end
 
 --[[------------------------------------
+	Name: NEXTBOT:CalcJumpHeightOverObstacles
+	Desc: (INTERNAL) Tries to calculate optimal height of jump to avoid obstacles to goal position.
+	Arg1: Vector | goal | Goal position.
+	Arg2: (optional) number | maxheight | Maximum jump height allowed in calculations. Default is NEXTBOT.MaxJumpToPosHeight.
+	Arg3: (optional) Vector | start | Overrides start position. Default is bot's current position.
+	Ret1: number | On success, calculated jump height. On failed, returns `nil` if calculations failed, `false` if jump height is greater than allowed, `true` if we are too close to obstacle and cannot jump now correctly.
+--]]------------------------------------
+function ENT:CalcJumpHeightOverObstacles(goal, maxheight, start)
+	maxheight = maxheight or self.MaxJumpToPosHeight
+	start = start or self:GetPos()
+
+	local bounds = self.CanCrouch and self.CrouchCollisionBounds or self.CollisionBounds
+	local mins, maxs = Vector(bounds[1]), bounds[2]
+	local step = self.StepHeight
+	local tolerance = math.max(maxs.x - mins.x, maxs.y - mins.y, maxs.z - mins.z, self:PathIsValid() and self:GetPath():GetGoalTolerance() or self.PathGoalTolerance)
+	local width = maxs.x - mins.x
+
+	local MIN_JUMP_DIST = 10
+
+	mins.z = mins.z + step
+
+	local dir2 = goal - start
+	dir2.z = 0
+	dir2:Normalize()
+
+	local filter = self:GetChildren()
+	filter[#filter + 1] = self
+	
+	local result = {}
+	local tr = {mins = mins, maxs = maxs, filter = filter, mask = self:GetSolidMask(), collisiongroup = self:GetCollisionGroup(), output = result}
+	local apexs, jumpapex = {}, Vector(goal)
+
+	while true do
+		local cstart = start
+
+		if #apexs > 0 then
+			local apex = apexs[#apexs]
+			local from = #apexs > 1 and apexs[#apexs - 1].endpos or start
+
+			while true do
+				tr.start = from
+				tr.endpos = apex.endpos
+				util.TraceHull(tr)
+
+				if !result.Hit then
+					apex.start = apex.endpos
+					debugoverlay.SweptBox(tr.start, result.HitPos, mins, maxs, angle_zero, 0.1, Color(0, 255, 0))
+					break
+				end
+
+				tr.start = apex.start
+				tr.endpos = apex.endpos
+				util.TraceHull(tr)
+
+				if !result.Hit then
+					tr.start = from
+					tr.endpos = apex.start
+					util.TraceHull(tr)
+
+					if !result.Hit then
+						debugoverlay.SweptBox(apex.start, apex.endpos, mins, maxs, angle_zero, 0.1, Color(0, 255, 0))
+						debugoverlay.SweptBox(tr.start, result.HitPos, mins, maxs, angle_zero, 0.1, Color(0, 255, 0))
+						break
+					end
+				end
+
+				if apex.start.z - start.z >= maxheight then
+					debugoverlay.SweptBox(apex.start, apex.endpos, mins, maxs, angle_zero, 0.1, Color(255, 0, 0))
+					debugoverlay.SweptBox(from, apex.start, mins, maxs, angle_zero, 0.1, Color(255, 255, 0))
+					debugoverlay.SweptBox(from, result.HitPos, mins, maxs, angle_zero, 0.1, Color(255, 0, 0))
+					return nil
+				else
+					apex.start.z = math.min(apex.start.z + (step < 5 and 5 or step), start.z + maxheight + 0.1)
+					apex.endpos.z = apex.start.z
+				end
+			end
+
+			if math.DistanceSqr(start.x, start.y, apex.start.x, apex.start.y) < math.DistanceSqr(start.x, start.y, jumpapex.x, jumpapex.y) then
+				jumpapex.x = apex.start.x
+				jumpapex.y = apex.start.y
+			end
+
+			if apex.start.z > jumpapex.z then
+				jumpapex.z = apex.start.z
+			end
+
+			cstart = apex.endpos
+		end
+
+		local dir = goal - cstart
+		local len = math.max(MIN_JUMP_DIST, dir:Length() - tolerance)
+		dir:Normalize()
+
+		tr.start = cstart
+		tr.endpos = cstart + dir * len
+		util.TraceHull(tr)
+
+		if result.Hit then
+			if result.Fraction == 0 then
+				debugoverlay.SweptBox(tr.start, result.HitPos, mins, maxs, angle_zero, 0.1, Color(255, 0, 0))
+				return #apexs == 0
+			end
+
+			if #apexs == 0 and result.HitPos:DistToSqr(start) < MIN_JUMP_DIST * MIN_JUMP_DIST then
+				debugoverlay.SweptBox(start, result.HitPos, mins, maxs, angle_zero, 0.1, Color(255, 100, 0))
+				return true
+			end
+
+			local endpos = result.HitPos + dir2 * width * 2
+			local dir = goal - endpos
+			dir.z = 0
+			dir:Normalize()
+
+			if dir2:Dot(dir) < 0.8 then
+				debugoverlay.SweptBox(tr.start, result.HitPos, mins, maxs, angle_zero, 0.1, Color(255, 0, 0))
+				return nil
+			end
+
+			apexs[#apexs + 1] = {start = result.HitPos, endpos = endpos}
+		else
+			debugoverlay.SweptBox(tr.start, result.HitPos, mins, maxs, angle_zero, 0.1, Color(255, 0, 255))
+
+			local fr = math.Clamp(math.Distance(jumpapex.x, jumpapex.y, start.x, start.y) / math.Distance(goal.x, goal.y, start.x, start.y), 0, 1)
+			local height = (jumpapex.z - start.z) / fr
+
+			if height > maxheight then
+				debugoverlay.Sphere(Vector(jumpapex.x, jumpapex.y, start.z + height), tolerance, 0.1, Color(255, 0, 0))
+				return false
+			end
+
+			debugoverlay.Sphere(jumpapex, tolerance, 0.1, Color(0, 0, 255))
+			return height
+		end
+	end
+end
+
+--[[------------------------------------
 	Name: NEXTBOT:JumpToPos
-	Desc: Makes bot jump to given position. Jump height depends on height difference of given position and current position.
+	Desc: Performs bot jump to given position. Jump height depends on height difference of given position and current position.
 	Arg1: Vector | pos | Position to jump to.
-	Arg2: (optional) height | Jump height. Default is CLuaLocomotion:GetJumpHeight()
+	Arg2: (optional) height | Additioal jump height. Can be used to jump over obstacles. Default is calculated from NEXTBOT:CalcJumpHeightOverObstacles.
 	Ret1: 
 --]]------------------------------------
 function ENT:JumpToPos(pos,height)
-	height = height or self.loco:GetJumpHeight()
+	if !height then
+		local result = self:CalcJumpHeightOverObstacles(pos)
+		height = isnumber(result) and result or 0
+	end
+
+	if height < self.loco:GetJumpHeight() then
+		height = self.loco:GetJumpHeight()
+	end
 
 	local curpos = self:GetPos()
-	local dir = pos-curpos
+	if pos.z - curpos.z > self.MaxJumpToPosHeight then
+		pos = Vector(pos.x, pos.y, curpos.z + self.MaxJumpToPosHeight)
+	end
+
+	local dir = pos - curpos
 	local dist = dir:Length()
-	dir:Div(dist)
+	dir:Normalize()
 	local g = self.loco:GetGravity()
 	
-	local maxh = math.max(pos.z,curpos.z)+height
+	local maxh = math.max(pos.z, curpos.z) + height
+	
 	local h1 = maxh-curpos.z
 	local h2 = maxh-pos.z
 	
-	local t1 = (2/g*h1)^0.5
-	local t2 = (2/g*h2)^0.5
-	local t = t1+t2
+	local t1 = math.sqrt(2 / g * h1)
+	local t2 = math.sqrt(2 / g * h2)
+	local t = t1 + t2
 	
 	self:Jump()
-	self.loco:SetVelocity(Vector(dir.x*dist/t,dir.y*dist/t,(2*g*h1)^0.5))
+	self.loco:SetVelocity(Vector(dir.x*dist/t,dir.y*dist/t,math.sqrt(2 *g * h1)))
 	
 	self.m_JumpingToPos = true
 end
@@ -1429,13 +1828,13 @@ end
 hook.Add("OnPhysgunPickup","SBAdvancedNextBots",function(ply,ent)
 	if ent.SBAdvancedNextBot then
 		ent.m_Physguned = true
-		ent.loco:SetGravity(0)
+		ent:UpdateGravity()
 	end
 end)
 
 hook.Add("PhysgunDrop","SBAdvancedNextBots",function(ply,ent)
 	if ent.SBAdvancedNextBot then
 		ent.m_Physguned = false
-		ent.loco:SetGravity(ent.DefaultGravity)
+		ent:UpdateGravity()
 	end
 end)

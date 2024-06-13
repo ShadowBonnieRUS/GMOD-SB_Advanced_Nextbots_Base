@@ -49,6 +49,8 @@ SBAdvancedNextbotNodeGraph.AI_NODE_FIRST_ZONE
 	Name: SBAdvancedNextbotNodeGraph.GetNearestNode
 	Desc: Returns nearest node to given position.
 	Arg1: Vector | Position.
+	Arg2: (optional) Vector | Use visibility check from this position.
+	Arg3: (optional) number | Mask used in visibility check (default is MASK_NPCSOLID_BRUSHONLY).
 	Ret1: SBNodeGraphNode | Nearest node.
 ----------------------------------------
 
@@ -106,7 +108,13 @@ SBAdvancedNextbotNodeGraph.AI_NODE_FIRST_ZONE
 	Desc: Computes path using nodegraph.
 	Arg1: Entity | Bot for computing path.
 	Arg2: Vector | Goal position.
-	Arg3: (optional) function | Custom cost generator. Arguments: SBNodeGraphNode node, SBNodeGraphNode from. Returns: number cost.
+	Arg3: (optional) function | Custom cost generator.
+		Arguments:
+		`node` - next node
+		`from` - previous node
+		`cap` - calculated capabilities between nodes, see CAP_* enums
+		Returns:
+			number cost.
 	Ret1: bool | true if path generated successfully, false otherwise.
 ----------------------------------------
 
@@ -195,6 +203,20 @@ SBAdvancedNextbotNodeGraph.AI_NODE_FIRST_ZONE
 ----------------------------------------
 
 ----------------------------------------
+	Name: SBNodeGraphPathFollower:PriorSegment
+	Desc: See PathFollower:PriorSegment
+	Arg1: 
+	Ret1: table | Segment data.
+----------------------------------------
+
+----------------------------------------
+	Name: SBNodeGraphPathFollower:NextSegment
+	Desc: See PathFollower:NextSegment
+	Arg1: 
+	Ret1: table | Segment data.
+----------------------------------------
+
+----------------------------------------
 	Name: SBNodeGraphPathFollower:ResetAge
 	Desc: See PathFollower:ResetAge
 	Arg1: 
@@ -243,8 +265,22 @@ AI_NODE_FIRST_ZONE		= 3
 PATH_SEGMENT_MOVETYPE_GROUND		= 0
 PATH_SEGMENT_MOVETYPE_CROUCHING		= 1
 PATH_SEGMENT_MOVETYPE_JUMPING		= 2
+PATH_SEGMENT_MOVETYPE_JUMPINGGAP	= 3
+PATH_SEGMENT_MOVETYPE_LADDERUP		= 4
+PATH_SEGMENT_MOVETYPE_LADDERDOWN	= 5
 
-local MAX_NODES				= 2000
+-- enum NavTraverseType game/server/nav.h
+local GO_NORTH			= 0
+local GO_EAST			= 1
+local GO_SOUTH			= 2
+local GO_WEST			= 3
+local GO_LADDER_UP		= 4
+local GO_LADDER_DOWN	= 5
+local GO_JUMP			= 6
+local GO_ELEVATOR_UP	= 7
+local GO_ELEVATOR_DOWN	= 8
+
+local MAX_NODES				= 3000
 local AI_MAX_NODE_LINKS		= 30
 local AINET_VERSION_NUMBER	= 37
 
@@ -256,10 +292,20 @@ local bits_LINK_STALE_SUGGESTED = 0x01
 local bits_LINK_OFF			= 0x02
 local bits_HULL_BITS_MASK	= 0x000002ff
 
+local HINT_JUMP_OVERRIDE	= 901
+
 local Nodes,NodeNum = {},0
 local EditOps,EditOpsInvert = {},{}
 local NodesPos,NodesLinks = {},{}
 local DynamicLinks = {}
+local Hints = {}
+
+local sb_anb_nodegraph_drawnodes = CreateConVar("sb_anb_nodegraph_drawnodes","0", FCVAR_ARCHIVE)
+local sb_anb_nodegraph_drawnodes_hull = CreateConVar("sb_anb_nodegraph_drawnodes_hull","0", FCVAR_ARCHIVE)
+local sb_anb_nodegraph_pathdebug = CreateConVar("sb_anb_nodegraph_pathdebug","0", FCVAR_ARCHIVE)
+local sb_anb_nodegraph_accurategetnearestnode = CreateConVar("sb_anb_nodegraph_accurategetnearestnode","1", FCVAR_ARCHIVE)
+local sb_anb_nodegraph_trivialcheck = CreateConVar("sb_anb_nodegraph_trivialcheck","1", FCVAR_ARCHIVE)
+local sb_anb_nodegraph_trivialcheck_debug = CreateConVar("sb_anb_nodegraph_trivialcheck_debug","0", FCVAR_ARCHIVE)
 
 local function DevMsg(msg) Msg("SBAdvancedNextbotNodeGraph: ",msg) end
 local function ThrowError(msg) error("SBAdvancedNextbotNodeGraph: "..msg,2) end
@@ -278,12 +324,12 @@ local function NewObject(meta)
 	return obj
 end
 
-local function PathCostGenerator(path,from,area,cap)
+local function PathCostGenerator(path, from, node, cap)
 	if path.m_customcostgen then
-		local success,cost = pcall(path.m_customcostgen,from,area,cap)
+		local success, cost = pcall(path.m_customcostgen, node, from, cap)
 		
 		if !success then
-			DevMsg("Path generation failed! "..cost.."\n")
+			DevMsg("Path cost generation failed! " .. cost .. "\n")
 			
 			return -1
 		end
@@ -293,77 +339,155 @@ local function PathCostGenerator(path,from,area,cap)
 	
 	if !from then return 0 end
 	
-	if bit.band(cap,CAP_MOVE_CLIMB)!=0 then return -1 end
-	
 	local frompos = from:GetOrigin()
-	local areapos = area:GetOrigin()
+	local nodepos = node:GetOrigin()
 	
-	local cost = frompos:Distance(areapos)
-	local z = areapos.z-frompos.z
+	local cost = frompos:Distance(nodepos)
+	local z = nodepos.z - frompos.z
 	
-	if z<0 and bit.band(cap,bit.bor(CAP_MOVE_GROUND,CAP_MOVE_JUMP))!=0 then
+	if z < 0 and bit.band(cap, bit.bor(CAP_MOVE_GROUND, CAP_MOVE_JUMP)) != 0 then
 		local maxh = path.m_Bot.loco:GetDeathDropHeight()
 		local h = -z
 		
-		if h>maxh then
-			local dist = math.Distance(frompos.x,frompos.y,areapos.x,areapos.y)
-			local ang = math.deg(math.atan(h/dist))
+		if h > maxh then
+			local dist = math.Distance(frompos.x, frompos.y, nodepos.x, nodepos.y)
+			local ang = math.deg(math.atan(h / dist))
 			
-			if ang>60 then return -1 end
+			if ang > 60 then return -1 end
 		end
 	end
+
+	if bit.band(cap, CAP_MOVE_CLIMB) != 0 then
+		return cost * (z > 0 and 0.5 or 4)
+	end
 	
-	if bit.band(cap,CAP_MOVE_JUMP)!=0 then
+	if bit.band(cap, CAP_MOVE_JUMP) != 0 then
 		local maxh = path.m_Bot.loco:GetJumpHeight()
-		if z>maxh then return -1 end
+		if z >= maxh then return -1 end
 		
-		return cost*5
-	elseif bit.band(cap,bit.bor(CAP_MOVE_GROUND,CAP_MOVE_FLY))!=0 then
+		return cost * 5
+	elseif bit.band(cap, bit.bor(CAP_MOVE_GROUND, CAP_MOVE_FLY)) != 0 then
 		return cost
 	end
 	
-	return cost*10
+	return cost * 10
 end
 
-local function GetCapBetweenNodes(from,to,hull,duckhull,cap)
-	for i=0,from:_NumLinks()-1 do
+local function TrivialPathCheck(start, goal, botdata, tolerance, distlimit)
+	local mins, maxs = Vector(botdata.cbounds[1]), botdata.cbounds[2]
+	mins.z = mins.z + botdata.step
+
+	local dir = goal - start
+	local len = dir:Length()
+	local step = maxs.x - mins.x
+	
+	if distlimit and len > step * 20 then return false end
+	
+	dir:Normalize()
+
+	local mask, filter = botdata.mask, botdata.filter
+	local height = Vector(0, 0, botdata.step * 2)
+	
+	local tlen = len - (tolerance or 0)
+
+	local result = {}
+	local tr = {start = start, endpos = start + dir * math.max(0, tlen), mins = mins, maxs = maxs, mask = mask, filter = filter, output = result}
+	util.TraceHull(tr)
+
+	local debug = sb_anb_nodegraph_trivialcheck_debug:GetBool()
+	if debug then
+		debugoverlay.SweptBox(start, result.HitPos, mins, maxs, angle_zero, 0.25, result.Fraction < 1 and Color(255, 0, 0) or Color(0, 255, 0))
+	end
+	
+	if result.Fraction < 1 then return false end
+	
+	for i = step, len, step * 1.5 do
+		tr.start = start + dir * i
+		tr.endpos = tr.start - height
+		util.TraceHull(tr)
+
+		if debug then
+			debugoverlay.SweptBox(tr.start, result.HitPos, mins, maxs, angle_zero, 0.25, result.Fraction >= 1 and Color(255, 0, 0) or Color(0, 255, 0))
+		end
+		
+		if result.Fraction >= 1 then return false end
+	end
+
+	tr.start = start
+	tr.endpos = start + dir * math.max(0, tlen)
+	tr.mins = Vector(botdata.bounds[1])
+	tr.maxs = botdata.bounds[2]
+	tr.mins.z = tr.mins.z + botdata.step
+	util.TraceHull(tr)
+	
+	return true, result.Fraction < 1
+end
+
+local function GetLinkCapabilities(link, from, to, botdata)
+	local hull, duckhull = botdata.hull, botdata.duckhull
+	local bcap, movetypes = botdata.cap, link.m_AcceptedMoveTypes
+
+	local cap, duck = bit.band(movetypes[hull], bcap), false
+	if cap == 0 then
+		cap, duck = bit.band(movetypes[duckhull], bcap), true
+	end
+
+	if cap == 0 then
+		duck = false
+
+		if bit.band(bcap, CAP_MOVE_GROUND) != 0 && bit.band(bit.bor(movetypes[hull], movetypes[duckhull]), CAP_MOVE_JUMP) != 0 then
+			local delta = to:GetOrigin() - from:GetOrigin()
+
+			if delta.z < 0 && delta.z > -botdata.deathdrop then
+				local len = math.sqrt(delta.x * delta.x + delta.y * delta.y)
+				local ang = math.deg(math.atan(-delta.z / len))
+				
+				if ang > 50 then
+					cap, duck = CAP_MOVE_GROUND, bit.band(movetypes[hull], CAP_MOVE_JUMP) == 0
+				end
+			end
+		end
+	end
+
+	return cap, duck
+end
+
+local function GetCapBetweenNodes(from, to, botdata)
+	for i = 0, from:_NumLinks() - 1 do
 		local link = from:_GetLink(i)
 		
-		if link:SrcNode()==from and link:DestNode()==to or link:SrcNode()==to and link:DestNode()==from then
-			if bit.band(link.m_AcceptedMoveTypes[hull],cap)==0 then
-				return link.m_AcceptedMoveTypes[duckhull],true
-			end
-			
-			return link.m_AcceptedMoveTypes[hull],false
+		if (link:SrcNode() == from or link:DestNode() == from) and link:DestNode(from) == to then
+			return GetLinkCapabilities(link, from, to, botdata)
 		end
 	end
 end
 
-local function ShouldSkipNodePosition(from,to,pos,isgoal,hull,duckhull,cap)
-	local dist = from:GetOrigin():DistToSqr(to:GetOrigin())
+local function GetCapForOutsideSegment(pos, from, to, goal, botdata)
+	local cap, duck = GetCapBetweenNodes(from, to, botdata)
 
-	if !isgoal then
-		if pos:DistToSqr(to:GetOrigin())>dist then
-			return false
-		end
-	else
-		if from:GetOrigin():DistToSqr(pos)>dist then
-			return false
-		end
+	if bit.band(cap, CAP_MOVE_CLIMB) != 0 then
+		if botdata.ladder then return end
+
+		return CAP_MOVE_GROUND, duck
+	elseif bit.band(cap, CAP_MOVE_JUMP) != 0 then
+		return CAP_MOVE_GROUND, duck
+	elseif bit.band(cap, CAP_MOVE_GROUND) != 0 then
+		local dist = from:GetOrigin():DistToSqr(to:GetOrigin())
+		local range = pos:DistToSqr(goal and from:GetOrigin() or to:GetOrigin())
+
+		if range < dist then return end
 	end
-	
-	local curcap,duckonly = GetCapBetweenNodes(from,to,hull,duckhull,cap)
-	
-	if bit.band(curcap,CAP_MOVE_JUMP)!=0 then
-		return false
-	end
-	
-	return true
+
+	return cap, duck
 end
 
-local function TranslateCapToPathSegmentType(cap,duckonly)
-	if bit.band(cap,CAP_MOVE_JUMP)!=0 then
+local function TranslateCapToPathSegmentType(cap, duckonly, start, goal)
+	if bit.band(cap, CAP_MOVE_JUMP) != 0 then
 		return PATH_SEGMENT_MOVETYPE_JUMPING
+	elseif bit.band(cap, CAP_MOVE_CLIMB) != 0 then
+		if goal.z != start.z then
+			return goal.z > start.z and PATH_SEGMENT_MOVETYPE_LADDERUP or PATH_SEGMENT_MOVETYPE_LADDERDOWN
+		end
 	end
 	
 	return duckonly and PATH_SEGMENT_MOVETYPE_CROUCHING or PATH_SEGMENT_MOVETYPE_GROUND
@@ -405,6 +529,46 @@ local function debugoverlay_HorzArrow(startpos,endpos,width,time,color,nodepth)
 	end
 end
 
+local function debugoverlay_VertArrow(startpos, endpos, width, time, color, nodepth)
+	local lineDir = endpos - startpos
+	lineDir:Normalize()
+
+	local sideDir = lineDir:Cross(vector_up)
+	sideDir:Normalize()
+
+	local upVec = sideDir:Cross(lineDir)
+	upVec:Normalize()
+
+	local radius = width / 2
+
+	local p1 = startpos - upVec * radius
+	local p2 = endpos - lineDir * width - upVec * radius
+	local p3 = endpos - lineDir * width - upVec * width
+	local p4 = endpos
+	local p5 = endpos - lineDir * width + upVec * width
+	local p6 = endpos - lineDir * width + upVec * radius
+	local p7 = startpos + upVec * radius
+
+	local col = color.a == 255 and color or ColorAlpha(color, 255)
+
+	debugoverlay.Line(p1, p2, time, col, nodepth)
+	debugoverlay.Line(p2, p3, time, col, nodepth)
+	debugoverlay.Line(p3, p4, time, col, nodepth)
+	debugoverlay.Line(p4, p5, time, col, nodepth)
+	debugoverlay.Line(p5, p6, time, col, nodepth)
+	debugoverlay.Line(p6, p7, time, col, nodepth)
+
+	if color.a > 0 then
+		debugoverlay.Triangle(p5, p4, p3, time, color, nodepth)
+		debugoverlay.Triangle(p1, p7, p6, time, color, nodepth)
+		debugoverlay.Triangle(p6, p2, p1, time, color, nodepth)
+
+		debugoverlay.Triangle(p3, p4, p5, time, color, nodepth)
+		debugoverlay.Triangle(p6, p7, p1, time, color, nodepth)
+		debugoverlay.Triangle(p1, p2, p6, time, color, nodepth)
+	end
+end
+
 local function NameMatch(query,name)
 	if name=="" then
 		return !query or query=="*"
@@ -429,14 +593,8 @@ local function NameMatch(query,name)
 	return false
 end
 
-local sb_anb_nodegraph_drawnodes = CreateConVar("sb_anb_nodegraph_drawnodes","0",bit.bor(FCVAR_NEVER_AS_STRING,FCVAR_ARCHIVE))
-local sb_anb_nodegraph_drawnodes_hull = CreateConVar("sb_anb_nodegraph_drawnodes_hull","0",bit.bor(FCVAR_NEVER_AS_STRING,FCVAR_ARCHIVE))
-local sb_anb_nodegraph_pathdebug = CreateConVar("sb_anb_nodegraph_pathdebug","0",bit.bor(FCVAR_NEVER_AS_STRING,FCVAR_ARCHIVE))
-local sb_anb_nodegraph_accurategetnearestnode = CreateConVar("sb_anb_nodegraph_accurategetnearestnode","0",bit.bor(FCVAR_NEVER_AS_STRING,FCVAR_ARCHIVE))
-
 local CAI_Node = {
 	_initialize = function(self,index,origin,yaw)
-		self.m_origin = Vector(origin)
 		self.m_yaw = yaw
 		self.m_id = index
 		
@@ -453,8 +611,7 @@ local CAI_Node = {
 		self.m_zone = AI_NODE_ZONE_UNKNOWN
 		self.m_info = 0
 		
-		NodesPos[index] = self.m_origin
-		NodesLinks[index] = self.m_origin
+		self:_SetOrigin(origin)
 	end,
 
 	_NumLinks = function(self) AssertValid(self) return self.m_NumLinks end,
@@ -467,10 +624,6 @@ local CAI_Node = {
 		
 		self.m_links[self.m_NumLinks] = link
 		self.m_NumLinks = self.m_NumLinks+1
-		
-		if self.m_NumLinks==1 then
-			NodesLinks[self.m_id] = nil
-		end
 	end,
 	_GetLink = function(self,num)
 		AssertValid(self)
@@ -560,6 +713,35 @@ local CAI_Node = {
 		
 		self.m_Removed = true
 	end,
+
+	_SetOrigin = function(self, origin)
+		self.m_origin = Vector(origin)
+
+		NodesPos[self.m_id] = self.m_origin
+		NodesLinks[self.m_id] = self.m_origin
+	end,
+
+	_InitPosition = function(self)
+		if self.m_type == NODE_CLIMB then
+			local normal = -Vector(math.cos(math.rad(self.m_yaw)), math.sin(math.rad(self.m_yaw)))
+			local endpos = self.m_origin + normal * 100
+
+			local tr = util.TraceLine({start = self.m_origin, endpos = endpos, mask = MASK_NPCSOLID_BRUSHONLY})
+			if tr.StartSolid and !tr.AllSolid then
+				local delta = endpos - self.m_origin
+				local offset = delta * tr.FractionLeftSolid + delta:GetNormalized() * 5
+
+				self:_SetOrigin(self.m_origin + offset)
+
+				local linknodes = self:GetAdjacentNodes()
+				for i=1,#linknodes do
+					if linknodes[i].m_type == NODE_CLIMB then
+						linknodes[i]:_SetOrigin(linknodes[i].m_origin + offset)
+					end
+				end
+			end
+		end
+	end,
 }
 
 local SBNodeGraphNode = {
@@ -580,9 +762,9 @@ local CAI_Link = {
 		end
 	end,
 	
-	DestNode = function(self) return self.dest end,
+	DestNode = function(self, src) return src == self.dest and self.src or self.dest end,
 	SrcNode = function(self) return self.src end,
-	DestNodeID = function(self) return self.dest:GetID() end,
+	DestNodeID = function(self, src) return self:DestNode(src):GetID() end,
 	SrcNodeID = function(self) return self.src:GetID() end,
 }
 
@@ -658,6 +840,35 @@ local CAI_DynamicLink = {
 	end,
 }
 
+local CAI_Hint = {
+	_initialize = function(self)
+		self.m_HintType = self.hint:GetInternalVariable("hinttype")
+		self.m_Group = self.hint:GetInternalVariable("Group")
+		self.m_Disabled = self.hint:GetInternalVariable("StartHintDisabled")
+		self.m_ActivityName = self.hint:GetInternalVariable("hintactivity")
+		self.m_TargetWCNodeID = self.hint:GetInternalVariable("TargetNode")
+		self.m_WCNodeID = self.hint:GetInternalVariable("nodeid")
+		self.m_IgnoreFacing = self.hint:GetInternalVariable("IgnoreFacing")
+		self.m_minState = self.hint:GetInternalVariable("MinimumState")
+		self.m_maxState = self.hint:GetInternalVariable("MaximumState")
+
+		self.m_Origin = Vector()
+		self.m_Name = ""
+		self.m_SpawnFlags = 0
+	end,
+
+	HintType = function(self) return self.m_HintType end,
+
+	SetOrigin = function(self, origin) self.m_Origin = Vector(origin) end,
+	GetOrigin = function(self) return Vector(self.m_Origin) end,
+
+	SetName = function(self, name) self.m_Name = name end,
+	GetName = function(self) return self.m_Name end,
+
+	AddSpawnFlags = function(self, flags) self.m_SpawnFlags = bit.bor(self.m_SpawnFlags, flags) end,
+	GetSpawnFlags = function(self) return self.m_SpawnFlags end,
+}
+
 local SearchList = {
 	_initialize = function(self)
 		self.Opened = {}
@@ -669,7 +880,7 @@ local SearchList = {
 	end,
 
 	IsOpenListEmpty = function(self)
-		return self.NumOpened==0
+		return self.NumOpened == 0
 	end,
 	
 	GetCostSoFar = function(self,node)
@@ -753,18 +964,19 @@ local PathFollower = {
 		self.AvoidRightTo = Vector()
 	end,
 	
-	_Astar = function(self,start,goal,hull,duckhull,cap)
-		local from = GetNearestNode(start)
-		local to = GetNearestNode(goal)
+	_Astar = function(self, start, goal, botdata)
+		local from = GetNearestNode(start, botdata.center)
+		local to = GetNearestNode(goal, goal + (botdata.center - botdata.pos))
 		
 		if !from or !to then return false end
 		
-		if from==to then
-			self:_ConstructTrivial(start,goal,from)
+		if from == to then
+			self:_ConstructTrivial(start, goal, from)
 			
 			return true
 		end
 		
+		local bot = self.m_Bot
 		local nodes = {}
 		nodes[from] = "start"
 		
@@ -778,8 +990,8 @@ local PathFollower = {
 		while !list:IsOpenListEmpty() do
 			local node = list:PopOpenList()
 			
-			if node==to then
-				return self:_Construct(nodes,from,to,start,goal,hull,duckhull,cap)
+			if node == to then
+				return self:_Construct(nodes, from, to, start, goal, botdata)
 			end
 			
 			list:AddToClosedList(node)
@@ -797,37 +1009,29 @@ local PathFollower = {
 					local allowuse = dlink:GetStrAllowUse()
 					
 					if dlink:GetInvertAllow() then
-						if NameMatch(allowuse,self.m_Bot:GetName()) or NameMatch(allowuse,self.m_Bot:GetClass()) then
+						if NameMatch(allowuse, bot:GetName()) or NameMatch(allowuse, bot:GetClass()) then
 							continue
 						end
 					else
-						if !NameMatch(allowuse,self.m_Bot:GetName()) and !NameMatch(allowuse,self.m_Bot:GetClass()) then
+						if !NameMatch(allowuse, bot:GetName()) and !NameMatch(allowuse, bot:GetClass()) then
 							continue
 						end
 					end
 				end
+
+				local neighbor = link:DestNode(node)
 				
-				local curcap = link.m_AcceptedMoveTypes[hull]
+				local curcap, duck = GetLinkCapabilities(link, node, neighbor, botdata)
+				if curcap == 0 then continue end
 				
-				if bit.band(cap,curcap)==0 then
-					curcap = link.m_AcceptedMoveTypes[duckhull]
-					
-					if bit.band(cap,curcap)==0 then
-						continue
-					end
-				end
+				local cost = PathCostGenerator(self, node, neighbor, curcap)
+				if cost < 0 then continue end
 				
-				local neighbor = link:DestNode()
-				if neighbor==node then neighbor = link:SrcNode() end
+				local newcost = list:GetCostSoFar(node) + cost
 				
-				local dist = PathCostGenerator(self,node,neighbor,curcap)
-				if dist<0 then continue end
-				
-				local newcost = list:GetCostSoFar(node)+dist
-				
-				if !list:IsClosed(neighbor) or newcost<list:GetCostSoFar(neighbor) then
-					list:SetCostSoFar(neighbor,newcost)
-					list:SetTotalCost(neighbor,newcost+neighbor:GetOrigin():Distance(to:GetOrigin()))
+				if !list:IsClosed(neighbor) or newcost < list:GetCostSoFar(neighbor) then
+					list:SetCostSoFar(neighbor, newcost)
+					list:SetTotalCost(neighbor, newcost + neighbor:GetOrigin():Distance(to:GetOrigin()))
 					
 					if !list:IsOpen(neighbor) then
 						list:AddToOpenList(neighbor)
@@ -845,7 +1049,7 @@ local PathFollower = {
 		return false
 	end,
 	
-	_Construct = function(self,nodes,from,to,start,goal,hull,duckhull,cap)
+	_Construct = function(self, nodes, from, to, start, goal, botdata)
 		local sequence = {}
 		local curnode = to
 		
@@ -853,25 +1057,29 @@ local PathFollower = {
 			local prevnode = nodes[curnode]
 			local curid = #sequence+1
 			
-			sequence[curid] = {prevnode:GetOrigin(),curnode:GetOrigin(),prevnode,curnode,GetCapBetweenNodes(prevnode,curnode,hull,duckhull,cap)}
+			sequence[curid] = {prevnode:GetOrigin(), curnode:GetOrigin(), prevnode, curnode, GetCapBetweenNodes(prevnode, curnode, botdata)}
 			
-			if curnode==to then
-				if ShouldSkipNodePosition(prevnode,curnode,goal,true,hull,duckhull,cap) then
+			if curnode == to then
+				local cap, duck = GetCapForOutsideSegment(goal, prevnode, curnode, true, botdata)
+
+				if !cap then
 					sequence[curid][2] = goal
 					sequence[curid][4] = nil
 				else
 					sequence[curid+1] = sequence[curid]
-					sequence[curid] = {curnode:GetOrigin(),goal,curnode,nil,CAP_MOVE_GROUND}
 					
-					curid = curid+1
+					sequence[curid] = {curnode:GetOrigin(), goal, curnode, nil, cap, duck}
+					curid = curid + 1
 				end
 			end
 			
-			if prevnode==from then
-				if ShouldSkipNodePosition(prevnode,curnode,start,false,hull,duckhull,cap) then
+			if prevnode == from then
+				local cap, duck = GetCapForOutsideSegment(start, prevnode, curnode, false, botdata)
+
+				if !cap then
 					sequence[curid][1] = start
 				else
-					sequence[curid+1] = {start,prevnode:GetOrigin(),nil,prevnode,CAP_MOVE_GROUND}
+					sequence[curid+1] = {start, prevnode:GetOrigin(), nil, prevnode, cap, duck}
 				end
 				
 				break
@@ -891,9 +1099,9 @@ local PathFollower = {
 			local data = sequence[i]
 			
 			local curnode = data[3] or data[4]
-			local movetype = TranslateCapToPathSegmentType(data[5],data[6])
+			local movetype = TranslateCapToPathSegmentType(data[5], data[6], data[1], data[2])
 			
-			prevsegment = self:_InsertSegment(data[1],data[2],node,movetype,prevsegment)
+			prevsegment = self:_InsertSegment(data[1], data[2], curnode, movetype, prevsegment)
 		end
 		
 		self.CurSegmentID = 0
@@ -905,56 +1113,36 @@ local PathFollower = {
 		return true
 	end,
 	
-	_BuildPath = function(self,bot)
+	_BuildPath = function(self, bot)
 		self.m_Bot = bot
-	
-		local cap = bot:CapabilitiesGet()
-		local hull = bot:GetHullType()
-		local duckhull = bot:GetDuckHullType()
-		local mask = bot:GetSolidMask()
-		local step = bot.loco:GetStepHeight()
+
+		local botdata = {
+			pos = bot:GetPos(),
+			center = bot:WorldSpaceCenter(),
+			cap = bot:CapabilitiesGet(),
+			hull = bot:GetHullType(),
+			duckhull = bot:GetDuckHullType(),
+			mask = bot:GetSolidMask(),
+			step = bot.loco:GetStepHeight(),
+			bounds = {Vector(bot.CollisionBounds[1]), Vector(bot.CollisionBounds[2])},
+			cbounds = {Vector(bot.CrouchCollisionBounds[1]), Vector(bot.CrouchCollisionBounds[2])},
+			deathdrop = bot.loco:GetDeathDropHeight(),
+			ladder = bot.m_Ladder,
+			filter = bot:GetChildren(),
+		}
+		botdata.filter[#botdata.filter + 1] = bot
 		
-		local bounds = bot.CrouchCollisionBounds
-		local mins,maxs = Vector(bounds[1]),Vector(bounds[2])
-		mins.z = mins.z+step
-		
-		local maxs2 = bot.CollisionBounds[2]
-		
-		local trivial,duckonly = self:_TrivialPathCheck(self.Start,self.Goal,mask,mins,maxs,maxs2,step,bot)
+		local trivial, duckonly = TrivialPathCheck(self.Start, self.Goal, botdata, bot.PathGoalToleranceFinal, true)
 		if trivial then
-			self:_ConstructTrivial(self.Start,self.Goal,GetNearestNode(self.Start),duckonly)
+			self:_ConstructTrivial(self.Start, self.Goal, GetNearestNode(self.Start, botdata.center), duckonly)
 			
 			return true
 		end
 		
-		return self:_Astar(self.Start,self.Goal,hull,duckhull,cap)
+		return self:_Astar(self.Start, self.Goal, botdata)
 	end,
 	
-	_TrivialPathCheck = function(self,start,goal,mask,mins,maxs,maxs2,height,filter)
-		local dir = goal-start
-		local len = dir:Length()
-		local step = maxs.x-mins.x
-		
-		if len>step*20 then return false end
-		
-		dir:Normalize()
-		
-		local tlen = len-self:GetGoalTolerance()
-		local result = util.TraceHull({start = start,endpos = start+dir*math.max(0,tlen),mins = mins,maxs = maxs,mask = mask,filter = filter})
-		
-		if result.Fraction<1 then return false end
-		
-		for i=step,len,step*1.5 do
-			local pos = start+dir*i
-			local result = util.TraceHull({start = pos,endpos = pos-Vector(0,0,height*2),mins = mins,maxs = maxs,mask = mask,filter = filter})
-			
-			if result.Fraction>=1 then return false end
-		end
-		
-		return true,util.TraceHull({start = start,endpos = start+dir*math.max(0,tlen),mins = mins,maxs = maxs2,mask = mask,filter = filter}).Fraction<1
-	end,
-	
-	_ConstructTrivial = function(self,startpos,endpos,node,duckonly)
+	_ConstructTrivial = function(self, startpos, endpos, node, duckonly)
 		self.Segments = {}
 		self.NumSegments = 0
 		self.Length = 0
@@ -981,6 +1169,26 @@ local PathFollower = {
 			type = movetype,
 			curvature = 0,
 		}
+
+		if movetype == PATH_SEGMENT_MOVETYPE_GROUND or movetype == PATH_SEGMENT_MOVETYPE_CROUCHING then
+			local yaw = math.atan2(dir.x, -dir.y)
+
+			if yaw >= -45 && yaw < 45 then
+				segment.how = GO_NORTH
+			elseif yaw >= 45 && yaw < 135 then
+				segment.how = GO_EAST
+			elseif yaw >= 135 || yaw < -135 then
+				segment.how = GO_SOUTH
+			elseif yaw >= -135 && yaw < -45 then
+				segment.how = GO_WEST
+			end
+		elseif movetype == PATH_SEGMENT_MOVETYPE_JUMPING or movetype == PATH_SEGMENT_MOVETYPE_JUMPINGGAP then
+			segment.how = GO_JUMP
+		elseif movetype == PATH_SEGMENT_MOVETYPE_LADDERUP then
+			segment.how = GO_LADDER_UP
+		elseif movetype == PATH_SEGMENT_MOVETYPE_LADDERDOWN then
+			segment.how = GO_LADDER_DOWN
+		end
 		
 		if prevsegment then
 			prevsegment.curvature = math.acos(dir:Dot(prevsegment.forward))/math.pi
@@ -1119,6 +1327,15 @@ local PathFollower = {
 	_GetNumSegment = function(self,num)
 		return self.Segments[num]
 	end,
+
+	_UpdateSegment = function(self)
+		self.CurSegmentID = self.CurSegmentID + 1
+		self.CurSegment = self.Segments[self.CurSegmentID]
+
+		if !self.CurSegment then
+			self:Invalidate()
+		end
+	end,
 	
 	Compute = function(self,bot,to,customgen)
 		self.Start = bot:GetPos()
@@ -1191,6 +1408,18 @@ local PathFollower = {
 	
 		return self:_GetNumSegment(self:_GetNumSegments()-1)
 	end,
+
+	PriorSegment = function(self)
+		if !self:IsValid() then return end
+
+		return self:_GetNumSegment(self.CurSegmentID - 1)
+	end,
+
+	NextSegment = function(self)
+		if !self:IsValid() then return end
+
+		return self:_GetNumSegment(self.CurSegmentID + 1)
+	end,
 	
 	ResetAge = function(self)
 		self.ComputeTime = CurTime()
@@ -1213,20 +1442,84 @@ local PathFollower = {
 		local goal = self.CurSegment
 		local goalpos = goal.pos
 		
-		if math.Distance(curpos.x,curpos.y,goalpos.x,goalpos.y)<=dist then
-			if self.CurSegmentID==self.NumSegments-1 then
-				self:Invalidate()
-				return
-			end
-			
-			self.CurSegmentID = self.CurSegmentID+1
-			self.CurSegment = self.Segments[self.CurSegmentID]
+		if !bot.m_Ladder && math.Distance(curpos.x,curpos.y,goalpos.x,goalpos.y)<=dist then
+			self:_UpdateSegment()
+			if !self:IsValid() then return end
 			
 			goal = self.CurSegment
 			goalpos = goal.pos
 		end
+
+		if bot.m_Ladder and goal.how != GO_LADDER_UP and goal.how != GO_LADDER_DOWN then
+			local next = self:NextSegment()
+
+			if next and (next.how == GO_LADDER_UP or next.how == GO_LADDER_DOWN) then
+				self:_UpdateSegment()
+				return self:Update(bot)
+			else
+				bot:DetachFromLadder()
+			end
+		end
 		
-		if goal.type==PATH_SEGMENT_MOVETYPE_GROUND or goal.type==PATH_SEGMENT_MOVETYPE_CROUCHING then
+		if goal.how == GO_LADDER_UP or goal.how == GO_LADDER_DOWN then
+			if !bot.m_Ladder then
+				if Either(goal.how == GO_LADDER_UP, curpos.z >= goalpos.z - bot.StepHeight, curpos.z <= goalpos.z + bot.StepHeight) then
+					self:_UpdateSegment()
+					return self:Update(bot)
+				else
+					local prev = self.Segments[self.CurSegmentID - 1]
+					local bottom = goal.how == GO_LADDER_UP and prev or goal
+					local top = goal.how == GO_LADDER_UP and goal or prev
+					
+					local yaw = math.rad(bottom.area:GetYaw())
+					local normal = -Vector(math.cos(yaw), math.sin(yaw), 0)
+
+					local mins, maxs = Vector(-1, -1, -1), Vector(1, 1, 1)
+					local width = bot:GetHullWidth() / 2
+					local tr = util.TraceHull({start = bottom.pos, endpos = bottom.pos + normal * width, mask = MASK_NPCSOLID_BRUSHONLY, mins = mins, maxs = maxs + top.pos - bottom.pos})
+					local offset = vector_origin
+
+					if tr.StartSolid and !tr.AllSolid then
+						offset = normal * width * tr.FractionLeftSolid
+					end
+
+					bot:AttachToLadder({bottom = bottom.pos + offset, top = top.pos + offset, normal = normal})
+					bot:Approach(curpos + Vector(0, 0, goal.how == GO_LADDER_UP and 1 or -1))
+				end
+			else
+				bot:Approach(curpos + Vector(0, 0, goal.how == GO_LADDER_UP and 1 or -1))
+			end
+		elseif goal.type == PATH_SEGMENT_MOVETYPE_GROUND or goal.type == PATH_SEGMENT_MOVETYPE_CROUCHING then
+			if sb_anb_nodegraph_trivialcheck:GetBool() and (!self.GroundAhead or CurTime() > self.GroundAhead) then
+				self.GroundAhead = CurTime() + 0.5
+
+				while true do
+					local next = self.Segments[self.CurSegmentID + 1]
+
+					if next and next.type == goal.type then
+						local bounds = goal.type == PATH_SEGMENT_MOVETYPE_CROUCHING and bot.CrouchCollisionBounds or bot.CollisionBounds
+						local trivial, duck = TrivialPathCheck(curpos, next.pos, {
+							cbounds = bot.CrouchCollisionBounds,
+							bounds = bot.CollisionBounds,
+							mask = MASK_NPCSOLID_BRUSHONLY,
+							step = bot.loco:GetStepHeight(),
+						})
+
+						if trivial then
+							self:_UpdateSegment()
+							if !self:IsValid() then return end
+							
+							goal = self.CurSegment
+							goalpos = goal.pos
+						else
+							break
+						end
+					else
+						break
+					end
+				end
+			end
+
 			local forward = goalpos-curpos
 			forward.z = 0
 			
@@ -1234,47 +1527,27 @@ local PathFollower = {
 			forward:Normalize()
 			
 			local left = Vector(-forward.y,forward.x,0)
-			local nearRange = 50
+			local nearRange = 50 + bot:GetHullWidth() / 2
 			
 			if range>nearRange then
 				goalpos = self:_Avoid(bot,goalpos,forward,left)
 			end
 			
-			bot.loco:Approach(goalpos,1)
-		elseif goal.type==PATH_SEGMENT_MOVETYPE_JUMPING then
+			bot:Approach(goalpos)
+		elseif goal.how == GO_JUMP then
 			if bot.loco:IsOnGround() then
-				local pos = bot:GetPos()
-				local dir = goalpos-pos
-				dir.z = 0
-				dir:Normalize()
+				local result = bot:CalcJumpHeightOverObstacles(goalpos)
 				
-				local b1,b2 = bot:GetCollisionBounds()
-				b1.z = b1.z+bot.loco:GetStepHeight()
-				
-				local filter = bot:GetChildren()
-				filter[#filter+1] = bot
-				
-				local range = math.Distance(pos.x,pos.y,goalpos.x,goalpos.y)/2
-				local topos = pos+dir*range+Vector(0,0,math.max(0,goalpos.z-pos.z+bot.JumpHeight/2))
-				
-				local result = util.TraceHull({
-					start = pos,
-					endpos = topos,
-					mins = b1,
-					maxs = b2,
-					mask = bot:GetSolidMask(),
-					filter = filter,
-				})
-				
-				if sb_anb_nodegraph_pathdebug:GetBool() then
-					debugoverlay.SweptBox(pos,topos,b1,b2,angle_zero,0.1,result.Hit and Color(255,0,0) or Color(0,255,0))
-				end
-				
-				if result.Hit then
-					goalpos = pos-dir*100
-					bot.loco:Approach(goalpos,1)
+				if isnumber(result) then
+					bot:JumpToPos(goalpos, result)
+				elseif result == true then
+					local dir = curpos - goalpos
+					dir.z = 0
+					dir:Normalize()
+
+					bot:Approach(curpos + dir * 100)
 				else
-					bot:JumpToPos(goalpos)
+					// We failed to calc jump height, don't move to prevent stuck or something
 				end
 			end
 		end
@@ -1316,6 +1589,10 @@ local PathFollower = {
 			for i=0,self.NumSegments-1 do
 				local cur = self.Segments[i]
 				local curpos = cur.pos
+
+				local to = curpos - lastpos
+				local horiz = math.max(math.abs(to.x), math.abs(to.y))
+				local vert = math.abs(to.z)
 				
 				local r,g,b = 255,77,0
 				
@@ -1323,27 +1600,32 @@ local PathFollower = {
 					r,g,b = 255,0,255
 				elseif cur.type==PATH_SEGMENT_MOVETYPE_JUMPING then
 					r,g,b = 0,0,255
-				/*elseif cur.type==PATH_SEGMENT_MOVETYPE_JUMPINGGAP then
+				elseif cur.type==PATH_SEGMENT_MOVETYPE_JUMPINGGAP then
 					r,g,b = 0,255,255
-				elseif cur.type==PATH_SEGMENT_MOVETYPE_LADDERDOWN then
-					r,g,b = 0,255,0
 				elseif cur.type==PATH_SEGMENT_MOVETYPE_LADDERUP then
-					r,g,b = 0,100,0*/
+					r,g,b = 0,255,0
+				elseif cur.type==PATH_SEGMENT_MOVETYPE_LADDERDOWN then
+					r,g,b = 0,100,0
 				end
 				
 				local color = Color(r,g,b)
+
+				if cur.how == GO_LADDER_UP or cur.how == GO_LADDER_DOWN then
+					debugoverlay_VertArrow(lastpos, curpos, 5, 0.1, color, true)
+				else
+					debugoverlay.Line(lastpos, curpos, 0.1, color, true)
+				end
 				
-				debugoverlay.Line(lastpos,curpos,0.1,color,true)
-				
-				local arrowlen = 25
-				local endpos = Vector(
-					lastpos.x+cur.forward.x*arrowlen,
-					lastpos.y+cur.forward.y*arrowlen,
-					lastpos.z+cur.forward.z*arrowlen
-				)
-				
-				debugoverlay_HorzArrow(lastpos,endpos,5,0.1,color,true)
-				debugoverlay.Text(cur.pos,i,0.1,true)
+				local nodeLength = 25
+				local nodePos = lastpos + cur.forward * nodeLength
+
+				if horiz > vert then
+					debugoverlay_HorzArrow(lastpos, nodePos, 5, 0.1, color, true)
+				else
+					debugoverlay_VertArrow(lastpos, nodePos, 5, 0.1, color, true)
+				end
+
+				debugoverlay.Text(cur.pos, i, 0.1, true)
 				
 				lastpos = curpos
 			end
@@ -1381,6 +1663,15 @@ local function new_DynamicLink(dlink)
 	return link
 end
 
+local function new_Hint(hint, nodeid)
+	local _hint = NewObject({__index = CAI_Hint})
+	_hint.hint = hint
+	_hint.nodeid = nodeid
+	_hint:_initialize()
+	
+	return _hint
+end
+
 local function CreateNode(origin,yaw)
 	if NodeNum>=MAX_NODES then
 		DevMsg("ERROR: too many nodes in map, deleting last node.\n")
@@ -1408,9 +1699,21 @@ local function CreateLink(src,dest)
 	src:_AddLink(link)
 	dest:_AddLink(link)
 	
-	NodesLinks[src:GetID().."_"..dest:GetID()] = {src:GetID(),dest:GetID(),(src:GetOrigin()+dest:GetOrigin())/2,src:GetOrigin():DistToSqr(dest:GetOrigin())/2}
+	local center = (src:GetOrigin() + dest:GetOrigin()) / 2
+	NodesLinks[src:GetID() .. "_" .. dest:GetID()] = {src:GetID(), dest:GetID(), center, src:GetOrigin():DistToSqr(center)}
 	
 	return link
+end
+
+local function CreateHint(hint, nodeid)
+	local _hint = new_Hint(hint, nodeid)
+
+	_hint:SetName(hint:GetName())
+	_hint:SetOrigin(hint:GetPos())
+
+	Hints[#Hints + 1] = _hint
+
+	return _hint
 end
 
 function Load()
@@ -1450,11 +1753,11 @@ function Load()
 	local mapver = f:ReadLong()
 	DevMsg("Map version "..mapver.."\n")
 	
-	if mapver!=mapversion and !GetConVar("g_ai_norebuildgraph"):GetBool() then
+	if mapver!=mapversion/* and !GetConVar("g_ai_norebuildgraph"):GetBool()*/ then
 		DevMsg("AI node graph "..filename.." is out of date (map version changed)\n")
 		
-		f:Close()
-		return false
+		--[[ f:Close()
+		return false ]]
 	end
 	
 	DevMsg("Done version checks\n")
@@ -1516,6 +1819,8 @@ function Load()
 		
 		EditOps[i] = wcid
 		EditOpsInvert[wcid] = i
+
+		Nodes[i]:_InitPosition()
 	end
 	
 	local dlinks = 0
@@ -1595,7 +1900,17 @@ end
 local DistToSqr = debug.getregistry().Vector.DistToSqr
 local DistanceToLine = util.DistanceToLine
 
-function GetNearestNode(pos)
+local VisibilityCheck = function(start, endpos, mask)
+	local tr = util.TraceLine({start = start, endpos = endpos, mask = mask or MASK_NPCSOLID_BRUSHONLY})
+	if !tr.Hit then return true end
+
+	local dist = start:Distance(endpos)
+	local trdist = start:Distance(tr.HitPos)
+
+	return dist - trdist < 5
+end
+
+function GetNearestNode(pos, visiblepos, mask)
 	local curnode,curdist
 	
 	if sb_anb_nodegraph_accurategetnearestnode:GetBool() then
@@ -1609,13 +1924,19 @@ function GetNearestNode(pos)
 				local dist,nearpos = DistanceToLine(start,endpos,pos)
 				
 				if !curdist or dist*dist<curdist then
-					curnode = DistToSqr(nearpos,start)<DistToSqr(nearpos,endpos) and Nodes[v[1]] or Nodes[v[2]]
-					curdist = dist*dist    
+					local newnode = DistToSqr(nearpos,start)<DistToSqr(nearpos,endpos) and
+					(!visiblepos or VisibilityCheck(visiblepos, start, mask)) and Nodes[v[1]] or
+					(!visiblepos or VisibilityCheck(visiblepos, endpos, mask)) and Nodes[v[2]]
+
+					if newnode then
+						curnode = newnode
+						curdist = dist*dist    
+					end
 				end
 			else
 				local dist = DistToSqr(pos,v)
 			
-				if !curdist or dist<curdist then
+				if (!curdist or dist<curdist) and (!visiblepos or VisibilityCheck(visiblepos, v, mask)) then
 					curnode,curdist = Nodes[k],dist
 				end
 			end
@@ -1624,7 +1945,7 @@ function GetNearestNode(pos)
 		for i=0,NodeNum-1 do
 			local dist = DistToSqr(pos,NodesPos[i])
 			
-			if !curdist or dist<curdist then
+			if (!curdist or dist<curdist) and (!visiblepos or VisibilityCheck(visiblepos, NodesPos[i], mask)) then
 				curnode,curdist = Nodes[i],dist
 			end
 		end
@@ -1675,6 +1996,7 @@ timer.Create("sb_anb_nodegraph_drawnodes",1,0,function()
 	
 	for i=0,NodeNum-1 do
 		local node = Nodes[i]
+		local origin = node:GetOrigin()
 		
 		local r,g,b = 255,0,0
 		
@@ -1692,7 +2014,12 @@ timer.Create("sb_anb_nodegraph_drawnodes",1,0,function()
 			r,g,b = 0,0,255
 		end
 		
-		debugoverlay.Box(node:GetOrigin(),mins,maxs,1.5,Color(r,g,b,0))
+		debugoverlay.Box(origin,mins,maxs,1.5,Color(r,g,b,0))
+
+		if node:GetType()==NODE_CLIMB then 
+			local offset = 12 * Vector(math.cos(math.rad(node:GetYaw())), math.sin(math.rad(node:GetYaw())), 3)
+			debugoverlay.Line(origin, origin + offset, 1.5, Color(r,g,b,0))
+		end
 		
 		if drawtype>1 then
 			debugoverlay.Text(node:GetOrigin()+Vector(0,0,1),node:GetID().."(WC: "..EditOps[node:GetID()]..")",1.5,true)
@@ -1745,4 +2072,47 @@ timer.Create("sb_anb_nodegraph_drawnodes",1,0,function()
 			end
 		end
 	end
+end)
+
+local HintNodeCount = 0
+local HintClasses = {
+	info_hint = true,
+	info_node = true,
+	info_node_hint = true,
+	info_node_air = true,
+	info_node_air_hint = true,
+	info_node_climb = true,
+}
+
+hook.Add("Initialize", "sb_anb_nodegraph_hints", function()
+	hook.Add("OnEntityCreated", "sb_anb_nodegraph_hints", function(ent)
+		local class = ent:GetClass()
+		if !HintClasses[class] then return end
+
+		if class == "info_hint" then
+			if ent:GetInternalVariable("hinttype") != 0 then
+				CreateHint(ent, NO_NODE)
+			end
+
+			return
+		end
+
+		local hint
+
+		if class == "info_node_hint" || class == "info_node_air_hint" then
+			if ent:GetInternalVariable("hinttype") != 0 || ent:GetInternalVariable("Group") != "" || ent:GetName() != "" then
+				hint = CreateHint(ent, HintNodeCount)
+				hint:AddSpawnFlags(ent:GetSpawnFlags())
+
+				print(ent)
+				PrintTable(ent:GetSaveTable(true))
+			end
+		end
+
+		HintNodeCount = HintNodeCount + 1
+	end)
+end)
+
+hook.Add("PostInitEntity", "sb_anb_nodegraph_hints", function()
+	hook.Remove("OnEntityCreated", "sb_anb_nodegraph_hints")
 end)

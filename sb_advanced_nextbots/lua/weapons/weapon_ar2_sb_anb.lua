@@ -50,8 +50,7 @@ function SWEP:PrimaryAttack()
 	if !self:CanPrimaryAttack() then return end
 	
 	local owner = self:GetOwner()
-	
-	owner:FireBullets({
+	self:FireBullets({
 		Num = 1,
 		Src = owner:GetShootPos(),
 		Dir = owner:GetAimVector(),
@@ -65,7 +64,7 @@ function SWEP:PrimaryAttack()
 	})
 	
 	self:DoMuzzleFlash()
-	self:GetOwner():EmitSound(Sound("Weapon_AR2.NPC_Single"))
+	self:GetParent():EmitSound(Sound("Weapon_AR2.NPC_Single"))
 	
 	self:SetClip1(self:Clip1()-1)
 	self:SetNextPrimaryFire(CurTime()+0.1)
@@ -89,6 +88,10 @@ function SWEP:DoMuzzleFlash()
 	end
 end
 
+function SWEP:GetTracerOrigin()
+	return self:GetParent():GetAttachment(self:GetParent():LookupAttachment("muzzle")).Pos
+end
+
 if CLIENT then
 	net.Receive("weapon_ar2_sb_anb.muzzleflash",function(len)
 		local ent = net.ReadEntity()
@@ -102,7 +105,7 @@ end
 function SWEP:SecondaryAttack()
 	if !self:CanSecondaryAttack() then return end
 	
-	self:GetOwner():EmitSound(Sound("Weapon_AR2.NPC_Double"))
+	self:EmitSound(Sound("Weapon_AR2.NPC_Double"))
 	
 	local pos = self:GetOwner():GetShootPos()
 	local target = self:GetOwner():GetAimVector()
