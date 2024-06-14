@@ -59,7 +59,7 @@ function SWEP:PrimaryAttack()
 	
 	self.Missile = missile
 	
-	self:GetOwner():EmitSound(Sound("Weapon_RPG.NPC_Single"))
+	self:GetParent():EmitSound(Sound("Weapon_RPG.NPC_Single"))
 	
 	self:SetClip1(self:Clip1()-1)
 	self:SetLastShootTime()

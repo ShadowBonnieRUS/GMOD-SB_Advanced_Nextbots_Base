@@ -26,18 +26,18 @@ end
 --]]------------------------------------
 
 function ENT:RunTask(event,...)
-	local m_ActiveTasksNum = self.m_ActiveTasksNum
-	if !m_ActiveTasksNum then return end
+	local callbacks = self.m_TaskCallbacks[event]
+	if !callbacks || #callbacks == 0 then return end
 	
+	local m_ActiveTasks = self.m_ActiveTasks
 	local m_TaskList = self.m_TaskList
 	local PassedTasks = {}
 	
+	local t = SysTime()
 	local k = 1
 	while true do
-		local v = m_ActiveTasksNum[k]
-		if !v then break end
-		
-		local task,data = v[1],v[2]
+		local task = callbacks[k]
+		if !task then break end
 		
 		if PassedTasks[task] then
 			k = k+1
@@ -46,6 +46,7 @@ function ENT:RunTask(event,...)
 		end
 		PassedTasks[task] = true
 		
+		local data = m_ActiveTasks[task]
 		local callback = m_TaskList[task][event]
 		
 		if callback then
@@ -59,11 +60,15 @@ function ENT:RunTask(event,...)
 				end
 			end
 			
-			while k>0 do
-				local cv = m_ActiveTasksNum[k]
-				if cv==v then break end
-				
-				k = k-1
+			if callbacks[k] != task then
+				k = k - 1
+
+				while k > 0 do
+					local ctask = callbacks[k]
+					if ctask == task then break end
+					
+					k = k - 1
+				end
 			end
 		end
 		
@@ -99,6 +104,45 @@ function ENT:RunCurrentTask(task,event,...)
 end
 
 --[[------------------------------------
+	Name: NEXTBOT:PushTask
+	Desc: (INTERNAL) Adds task callbacks to call list
+	Arg1: any | task | Task name.
+	Ret1: 
+--]]------------------------------------
+function ENT:PushTask(task)
+	local data = self.m_TaskList[task]
+
+	if data then
+		for k, v in pairs(data) do
+			if !isfunction(v) then continue end
+
+			if !self.m_TaskCallbacks[k] then
+				self.m_TaskCallbacks[k] = {}
+			end
+
+			self.m_TaskCallbacks[k][#self.m_TaskCallbacks[k] + 1] = task
+		end
+	end
+end
+
+--[[------------------------------------
+	Name: NEXTBOT:PopTask
+	Desc: (INTERNAL) Removes task callbacks from call list
+	Arg1: any | task | Task name.
+	Ret1: 
+--]]------------------------------------
+function ENT:PopTask(task)
+	for event, callbacks in pairs(self.m_TaskCallbacks) do
+		for i = 1, #callbacks do
+			if callbacks[i] == task then
+				table.remove(callbacks, i)
+				break
+			end
+		end
+	end
+end
+
+--[[------------------------------------
 	Name: NEXTBOT:StartTask
 	Desc: Starts new task with given data and calls 'OnStart' task callback. Does nothing if given task already started.
 	Arg1: any | task | Task name.
@@ -111,13 +155,7 @@ function ENT:StartTask(task,data)
 	data = data or {}
 	self.m_ActiveTasks[task] = data
 	
-	local m_ActiveTasksNum = self.m_ActiveTasksNum
-	if !m_ActiveTasksNum then
-		m_ActiveTasksNum = {}
-		self.m_ActiveTasksNum = m_ActiveTasksNum
-	end
-	m_ActiveTasksNum[#m_ActiveTasksNum+1] = {task,data}
-	
+	self:PushTask(task)
 	self:RunCurrentTask(task,"OnStart")
 end
 
@@ -134,19 +172,12 @@ function ENT:TaskComplete(task)
 	self:RunCurrentTask(task,"OnDelete")
 	
 	self.m_ActiveTasks[task] = nil
-	
-	local m_ActiveTasksNum = self.m_ActiveTasksNum
-	for i=1,#m_ActiveTasksNum do
-		if m_ActiveTasksNum[i][1]==task then
-			table.remove(m_ActiveTasksNum,i)
-			break
-		end
-	end
+	self:PopTask(task)
 end
 
 --[[------------------------------------
 	Name: NEXTBOT:TaskFail
-	Desc: Calls 'OnFail' and 'OnDelete' task callbacks and deletes task. Does nothing if given task not started.
+	Desc: Calls 'OnFail' and 'OnDelete' task callbacks and deletes task. Does nothing if given task is not started.
 	Arg1: any | task | Task name.
 	Ret1: 
 --]]------------------------------------
@@ -157,14 +188,7 @@ function ENT:TaskFail(task)
 	self:RunCurrentTask(task,"OnDelete")
 	
 	self.m_ActiveTasks[task] = nil
-	
-	local m_ActiveTasksNum = self.m_ActiveTasksNum
-	for i=1,#m_ActiveTasksNum do
-		if m_ActiveTasksNum[i][1]==task then
-			table.remove(m_ActiveTasksNum,i)
-			break
-		end
-	end
+	self:PopTask(task)
 end
 
 --[[------------------------------------

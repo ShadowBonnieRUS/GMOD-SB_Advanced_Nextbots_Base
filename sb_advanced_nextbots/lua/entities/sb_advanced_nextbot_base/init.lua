@@ -34,7 +34,10 @@ ENT.AccelerationSpeed = 1000
 ENT.DecelerationSpeed = 3000
 
 -- Bot's aiming speed, in degrees per second
-ENT.AimSpeed = 180
+ENT.AimSpeed = 360
+
+-- Bot's ladder climb speed
+ENT.LadderClimbSpeed = 200
 
 -- Bot's collision bounds, min max
 ENT.CollisionBounds = {Vector(-16,-16,0),Vector(16,16,72)}
@@ -45,11 +48,14 @@ ENT.CrouchCollisionBounds = {Vector(-16,-16,0),Vector(16,16,36)}
 -- Can bot crouch
 ENT.CanCrouch = true
 
+-- Can bot use ladders
+ENT.CanUseLadder = true
+
 -- Max height the bot can step up
 ENT.StepHeight = 18
 
 -- Bot's jump height
-ENT.JumpHeight = 70
+ENT.JumpHeight = 50
 
 -- Height limit for path finding. Using nodegraph for CAP_MOVE_JUMP links, too high nodes will be skipped. For navmesh, not jumping on NAV_MESH_JUMP if too high
 ENT.MaxJumpToPosHeight = ENT.JumpHeight
@@ -59,9 +65,6 @@ ENT.DeathDropHeight = 200
 
 -- Default gravity for bot
 ENT.DefaultGravity = 600
-
--- While moving along path, bot will jump after this time if it thinks it stuck
-ENT.PathStuckJumpTime = 0.5
 
 -- Solid mask used for raytracing when detecting collision while moving
 ENT.SolidMask = MASK_NPCSOLID
@@ -91,7 +94,7 @@ ENT.PathGoalToleranceFinal = 25
 ENT.PathRecompute = 5
 
 -- Draws path if valid. Used for debug
-ENT.DrawPath = CreateConVar("sb_anb_drawpath",0)
+ENT.DrawPath = CreateConVar("sb_anb_drawpath", 0, FCVAR_ARCHIVE)
 
 --[[-------------------------------------------------------
 	NEXTBOT Meta Table Setup
@@ -127,13 +130,16 @@ function ENT:Initialize()
 	self.m_UseNodeGraph = false
 	self.m_TaskList = {}
 	self.m_ActiveTasks = {}
+	self.m_TaskCallbacks = {}
 	self.m_Stuck = false
 	self.m_StuckTime = CurTime()
 	self.m_StuckTime2 = 0
 	self.m_StuckPos = self:GetPos()
 	self.m_HullType = HULL_HUMAN
+	self.m_DuckHullType = HULL_TINY
 	self.m_PassIsNPCCheck = true
 	self.m_PitchAim = 0
+	self.m_Conditions = {}
 	
 	self.loco:SetGravity(self.DefaultGravity)
 	self.loco:SetAcceleration(self.AccelerationSpeed)
@@ -279,11 +285,12 @@ include("nodegraph_path.lua")
 AddCSLuaFile("tasks.lua")
 include("tasks.lua")
 
+function ENT:SetCondition(condition) self.m_Conditions[condition] = true end
+function ENT:HasCondition(condition) return self.m_Conditions[condition] or false end
+function ENT:ClearCondition(condition) self.m_Conditions[condition] = nil end
+
 -- NPC Stubs
 
-function ENT:SetCondition(condition) end
-function ENT:HasCondition(condition) return false end
-function ENT:ClearCondition(condition) end
 function ENT:ConditionName(condition) return "" end
 
 function ENT:ClearSchedule() end

@@ -91,7 +91,7 @@ function ENT:EntShootPos(ent,random)
 		
 		local data
 		
-		if hitboxes[HITGROUP_HEAD] then
+		if hitboxes[HITGROUP_HEAD] and !self:IsMeleeWeapon() then
 			data = hitboxes[HITGROUP_HEAD][random and math.random(#hitboxes[HITGROUP_HEAD]) or 1]
 		elseif hitboxes[HITGROUP_CHEST] then
 			data = hitboxes[HITGROUP_CHEST][random and math.random(#hitboxes[HITGROUP_CHEST]) or 1]
@@ -164,7 +164,7 @@ function ENT:FindEnemies()
 	local UpdateEnemyMemory = self.UpdateEnemyMemory
 	local EntShootPos = self.EntShootPos
 
-	for k,v in ipairs(ents.GetAll()) do
+	for k,v in ents.Iterator() do
 		if v==self or !ShouldBeEnemy(self,v) or !CanSeePosition(self,v) then continue end
 		
 		UpdateEnemyMemory(self,v,EntShootPos(self,v))
@@ -233,10 +233,10 @@ end
 function ENT:ShouldBeEnemy(ent)
 	if ent:IsFlagSet(FL_NOTARGET) or !ent:IsPlayer() and !ent:IsNPC() and !ent:IsFlagSet(FL_OBJECT) then return false end
 	if ent:IsPlayer() and GetConVar("ai_ignoreplayers"):GetBool() then return false end
-	if !ent.SBAdvancedNextBot and ent:IsNPC() and (ent:GetNPCState()==NPC_STATE_DEAD or ent:GetClass()=="npc_barnacle" and ent:GetInternalVariable("m_takedamage")==0) then return false end
+	if !ent.SBAdvancedNextBot and ent:IsNPC() and (ent:GetNPCState()==NPC_STATE_DEAD or ent:GetClass()=="npc_barnacle" and ent:GetInternalVariable("m_takedamage")==0 or (ent:GetClass()=="monster_turret" or ent:GetClass()=="monster_miniturret") and ent:Health()<=0) then return false end
 	if (ent.SBAdvancedNextBot or !ent:IsNPC()) and ent:Health()<=0 then return false end
 	if self:GetRelationship(ent)!=D_HT then return false end
-	if self:GetRangeTo(ent)>self.MaxSeeEnemyDistance then return false end
+	if self:GetRangeSquaredTo(ent)>self.MaxSeeEnemyDistance^2 then return false end
 	
 	return true
 end
@@ -260,10 +260,10 @@ function ENT:FindPriorityEnemy()
 			continue
 		end
 		
-		local rang = self:GetRangeTo(k)
+		local rang = self:GetRangeSquaredTo(k)
 		local d,pr = self:GetRelationship(k)
 		
-		if !byrange and rang<=self.CloseEnemyDistance then
+		if !byrange and rang<=self.CloseEnemyDistance^2 then
 			-- too close, ignore priority
 			byrange = true
 		end
@@ -277,7 +277,7 @@ function ENT:FindPriorityEnemy()
 		-- we dont see any enemy, but we know last position
 	
 		for k,v in ipairs(notsee) do
-			local rang = self:GetRangeTo(self:GetLastEnemyPosition(v))
+			local rang = self:GetRangeSquaredTo(self:GetLastEnemyPosition(v))
 			
 			if !enemy or rang<range then
 				enemy,range = v,rang

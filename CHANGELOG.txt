@@ -1,0 +1,67 @@
+-------------------------------------
+UPDATE 2024-06-13
+-------------------------------------
+
+1. NEW FEATURES
+
+1.1. Node Graph module
+1.1.1. Added SBNodeGraphPathFollower:PriorSegment and SBNodeGraphPathFollower:NextSegment.
+1.1.2. Added sb_anb_nodegraph_trivialcheck. Enables/disables trivial path checking.
+1.1.3. Added sb_anb_nodegraph_trivialcheck_debug. Shows trivial check traces using debug overlay.
+1.1.4. Added support for using ladders (using CAP_MOVE_CLIMB link movetype as ladder).
+
+1.2. Nextbot base
+1.2.1. Added NEXTBOT:LocomotionUpdate where velocity and other locomotion stuff should be called.
+1.2.2. Added condition related functions from NPCs.
+1.2.3. Added ability to use custom ladders and CNavLadder ladders. Use NEXTBOT.CanUseLadder to enable/disable climbing. Default climb speed is 200.
+1.2.4. Added NEXTBOT:GetHullWidth. Returns collision hull width as number.
+1.2.5. Added NEXTBOT:AttachToLadder, NEXTBOT:DetachFromLadder, NEXTBOT:IsUsingLadder.
+1.2.6. Added NEXTBOT:CalcJUmpHeightOverObstacles to calculate correct jump height to goal.
+
+1.3. Nextbot soldier base
+1.3.1. Added hl1 enemies support.
+
+2. IMPROVEMENTS
+
+2.1. Node Graph module
+2.1.1. SBNodeGraphPathFollower:Compute custom cost generator function now calls with `cap` parameter (available capabilities to use).
+2.1.2. More work with capabilities while path finding.
+2.1.3. Set `how` parameter of SBNodeGraphPathFollower segments to related GO_* enum.
+2.1.4. Better jumping support while moving along the path.
+2.1.5. Disabled map versions mismatch check between map and node graph file while loading graph.
+2.1.6. Added `visiblepos` and `mask` optional parameters to GetNearestNode function for visibility checking.
+
+2.2. Nextbot base
+2.2.1. Rework task callback running to optimize calls.
+2.2.2. Some minor optimization stuff with whole base.
+2.2.3. Dont mark dead hl1 turrets as enemies.
+2.2.4. Increase aiming speed from 180 to 360.
+2.2.5. Decrease jump height from 70 to 50.
+2.2.6. Added FCVAR_ARCHIVE to ConVar sb_anb_drawpath.
+2.2.7. Cancel current gesture when trying to play new gesture with same sequence.
+2.2.8. Make bot crouch when current path segment marked as NAV_MESH_CROUCH.
+2.2.9. Better jump support for navmesh path.
+2.2.10. Restoring velocity after landing on ground.
+2.2.11. Applying PAS recipient filter for step sounds.
+2.2.12. Using different ACTs for range and reload gestures depending on crouching state.
+
+2.3. Nextbot soldier base
+2.3.1. Increase NEXTBOT.PathGoalToleranceFinal from 50 to 70.
+2.3.2. Decrease range need to be far from leader to start following him from 300 to 100.
+2.3.3. Make bots capable to using ladders.
+2.3.4. Dont trying to step back when we are touched by enemy.
+
+3. FIXES
+
+3.1. Node Graph module
+3.1.1. Fixed SBNodeGraphNode links related functions returns current node instead of destination node due to link nature.
+3.1.2. Fixed SBNodeGraphPathFollower:Draw draws LADDER_UP segment as LADDER_DOWN and vice vesta.
+
+3.2. Nextbot base
+3.2.1. Emit engine weapon lua analogs sounds from original weapon, not nextbot inself.
+3.2.2. Fixed engine weapon lua analogs bullet tracer origin, now it starts from weapon, not nextbot head.
+3.2.3. Make crossbow lua analog bolts not solid for few frames to make sure it will not hit the owner.
+3.2.4. Prevent smg1 lua analog grenades from exploding for few frames to make sure it will not hit the owner.
+
+3.3. Nextbot soldier base
+3.3.1. Make bots still shooting at enemy when line of sight blocked with other enemy.

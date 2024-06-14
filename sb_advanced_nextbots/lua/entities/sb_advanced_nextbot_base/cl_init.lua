@@ -7,7 +7,7 @@ include("shared.lua")
 function ENT:Initialize()
 	self.m_TaskList = {}
 	self.m_ActiveTasks = {}
-	self.m_ActiveTasksID = {}
+	self.m_TaskCallbacks = {}
 	
 	self:SetupTaskList(self.m_TaskList)
 	self:SetupTasks()

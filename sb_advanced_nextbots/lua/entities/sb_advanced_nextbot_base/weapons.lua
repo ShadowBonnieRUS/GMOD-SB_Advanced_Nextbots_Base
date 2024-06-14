@@ -7,6 +7,8 @@ local EngineAnalogs = {
 	weapon_crossbow = "weapon_crossbow_sb_anb",
 	weapon_rpg = "weapon_rpg_sb_anb",
 	weapon_shotgun = "weapon_shotgun_sb_anb",
+	weapon_crowbar = "weapon_crowbar_sb_anb",
+	weapon_stunstick = "weapon_stunstick_sb_anb",
 }
 
 local EngineAnalogsReverse = {}
@@ -86,8 +88,10 @@ function ENT:SetupWeapon(wep)
 		actwep:SetClip2(wep:Clip2())
 		
 		hook.Add("Think",actwep,function(self)
-			wep:SetClip1(self:Clip1())
-			wep:SetClip2(self:Clip2())
+			if IsValid(wep) then
+				wep:SetClip1(self:Clip1())
+				wep:SetClip2(self:Clip2())
+			end
 		end)
 		
 		hook.Add("EntityRemoved",actwep,function(self,ent)
@@ -297,8 +301,11 @@ function ENT:WeaponPrimaryAttack()
 	self:DoRangeGesture()
 	
 	if self:ShouldWeaponAttackUseBurst(wep) then
-		local bmin,bmax,frate = wep:GetNPCBurstSettings()
-		local rmin,rmax = wep:GetNPCRestTimes()
+		local bmin, bmax, frate = 1, 1, 1
+		if wep.GetNPCBurstSettings then bmin,bmax,frate = wep:GetNPCBurstSettings() end
+
+		local rmin,rmax = 0.33, 0.66
+		if wep.GetNPCRestTimes then rmin,rmax = wep:GetNPCRestTimes() end
 		
 		if data.BurstBullets==-1 then
 			data.BurstBullets = math.random(bmin,bmax)
@@ -314,7 +321,9 @@ function ENT:WeaponPrimaryAttack()
 			data.NextShootTime = math.max(CurTime()+frate,data.NextShootTime)
 		end
 	else
-		local bmin,bmax,frate = wep:GetNPCBurstSettings()
+		local bmin, bmax, frate = 1, 1, 1
+		if wep.GetNPCBurstSettings then bmin,bmax,frate = wep:GetNPCBurstSettings() end
+
 		data.NextShootTime = math.max(CurTime()+frate,data.NextShootTime)
 	end
 end
@@ -359,8 +368,12 @@ function ENT:GetAimVector()
 	local dir = self:GetEyeAngles():Forward()
 	
 	if self:HasWeapon() then
-		local deg = self:GetActiveLuaWeapon():GetNPCBulletSpread(self:GetCurrentWeaponProficiency())
-		deg = math.sin(math.rad(deg))/2
+		local wep = self:GetActiveLuaWeapon()
+		local spread = 15
+
+		if wep.GetNPCBulletSpread then spread = wep:GetNPCBulletSpread(self:GetCurrentWeaponProficiency()) end
+
+		local deg = math.sin(math.rad(spread))/2
 		
 		dir:Add(Vector(math.Rand(-deg,deg),math.Rand(-deg,deg),math.Rand(-deg,deg)))
 	end
@@ -375,7 +388,7 @@ end
 	Ret1: number | Animation duration.
 --]]------------------------------------
 function ENT:DoRangeGesture()
-	local act = self:TranslateActivity(ACT_MP_ATTACK_STAND_PRIMARYFIRE)
+	local act = self:TranslateActivity(self:IsCrouching() and ACT_MP_ATTACK_CROUCH_PRIMARYFIRE or ACT_MP_ATTACK_STAND_PRIMARYFIRE)
 	local seq = self:SelectWeightedSequence(act)
 	
 	self:DoGesture(act)
@@ -390,7 +403,7 @@ end
 	Ret1: number | Animation duration.
 --]]------------------------------------
 function ENT:DoReloadGesture()
-	local act = self:TranslateActivity(ACT_MP_RELOAD_STAND)
+	local act = self:TranslateActivity(self:IsCrouching() and ACT_MP_RELOAD_CROUCH or ACT_MP_RELOAD_STAND)
 	local seq = self:SelectWeightedSequence(act)
 	
 	self:DoGesture(act)
@@ -472,7 +485,7 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:CanDropWeaponOnDie
-	Desc: Decides can bot drop weapon on die. NOTE: Weapon also may not drop even with `true` if weapon's `SWEP:ShouldDropOnDie` returns `false`.
+	Desc: Decides can bot drop weapon on death. NOTE: Weapon also may not drop even with `true` if weapon's `SWEP:ShouldDropOnDie` returns `false`.
 	Arg1: Weapon | wep | Current active weapon (this will be lua analog for engine weapon).
 	Ret1: bool | Can drop.
 --]]------------------------------------
@@ -497,7 +510,7 @@ end
 	Ret1: bool | Weapon is melee weapon.
 --]]------------------------------------
 function ENT:IsMeleeWeapon(wep)
-	wep = wep or self:GetActiveWeapon()
+	wep = wep or self:GetActiveLuaWeapon()
 	
 	return IsValid(wep) and wep.GetCapabilities and bit.band(wep:GetCapabilities(),CAP_WEAPON_MELEE_ATTACK1)!=0 or false
 end

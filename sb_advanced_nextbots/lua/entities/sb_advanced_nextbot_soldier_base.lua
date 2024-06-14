@@ -30,7 +30,7 @@ local UseNodeGraph = CreateConVar(
 	"sb_advanced_nextbot_soldier_usenodegraph",
 	"0",
 	bit.bor(FCVAR_NEVER_AS_STRING,FCVAR_ARCHIVE),
-	"Should bots use nodegraph or navmesh when finding path",
+	"Should bots use nodegraph instead of navmesh when finding path",
 	0,
 	1
 )
@@ -40,7 +40,7 @@ local UseNodeGraph = CreateConVar(
 --]]------------------------------------
 
 ENT.SpawnHealth = 70
-ENT.PathGoalToleranceFinal = 50
+ENT.PathGoalToleranceFinal = 70
 
 local ENEMY_CLASSES
 
@@ -65,6 +65,7 @@ ENT.TaskList = {
 			
 			local wep = self:GetActiveWeapon()
 			local enemy = self:GetEnemy()
+			local melee = self:IsMeleeWeapon()
 		
 			if self.IsSeeEnemy and IsValid(enemy) then
 				local pos = self:GetShootPos()
@@ -74,20 +75,31 @@ ENT.TaskList = {
 			
 				self:SetDesiredEyeAngles(dir:Angle())
 				
-				if wep:Clip1()<=0 then
+				if melee and !self:HasCondition(23) then return end
+				
+				if !melee and wep:Clip1()<=0 then
 					self:WeaponReload()
 				end
 				
 				if self:RunTask("PreventShooting") then return end
 				
-				local dot = math.Clamp(self:GetEyeAngles():Forward():Dot(dir),0,1)
+				local eyedir = self:GetEyeAngles():Forward()
+				local dot = math.Clamp(eyedir:Dot(dir),0,1)
 				local ang = math.deg(math.acos(dot))
+				local shoot = ang<=25
 				
-				if ang<=25 then
+				if !shoot then
 					local filter = self:GetChildren()
 					filter[#filter+1] = self
-					filter[#filter+1] = enemy
+					
+					local tr = util.TraceLine({start = pos,endpos = pos+eyedir*50,mask = MASK_SHOT,filter = filter})
+					
+					if tr.Hit and self:ShouldBeEnemy(tr.Entity) then
+						shoot = true
+					end
+				end
 				
+				if shoot then
 					if self.LastShootBlocker then
 						if self:IsTaskActive("movement_wait") and CurTime()-data.PassBlockerTime>0.5 then
 							data.PassBlocker(self.LastShootBlocker)
@@ -98,7 +110,7 @@ ENT.TaskList = {
 						self:WeaponPrimaryAttack()
 					end
 				end
-			elseif wep:Clip1()<wep:GetMaxClip1()/2 then
+			elseif !melee and wep:Clip1()<wep:GetMaxClip1()/2 then
 				self:WeaponReload()
 			end
 		end,
@@ -175,12 +187,14 @@ ENT.TaskList = {
 				task,data = "movement_getweapon",{Wep = findwep}
 			else
 				if IsValid(self.Target) then
-					if self:GetRangeTo(self.Target)>300 or !self:CanSeePosition(self.Target) then
+					if self:GetRangeSquaredTo(self.Target)>100*100 or !self:CanSeePosition(self.Target) then
 						task = "movement_followtarget"
+					elseif self:IsMeleeWeapon() and IsValid(self:GetEnemy()) and self.Target:GetPos():DistToSqr(self:GetEnemy():GetPos())<=300*300 and self:GetRangeSquaredTo(self:GetEnemy())>50*50 then
+						task = "movement_followenemy"
 					end
 				else
 					if IsValid(self:GetEnemy()) then
-						if self:GetRangeTo(self:GetEnemy())>300 then
+						if self:GetRangeSquaredTo(self:GetEnemy())>(self:IsMeleeWeapon() and 50*50 or 300*300) then
 							task = "movement_followenemy"
 						end
 					else
@@ -211,6 +225,7 @@ ENT.TaskList = {
 			self:StartTask("enemy_handler")
 			self:StartTask("movement_wait")
 			self:StartTask("shooting_handler")
+			self:StartTask("movement_meleecontrol")
 		end,
 	},
 	["movement_getweapon"] = {
@@ -236,7 +251,7 @@ ENT.TaskList = {
 				self:TaskComplete("movement_getweapon")
 				self:StartTask("movement_wait")
 				
-				if self:GetRangeTo(data.Wep)<50 then
+				if self:GetRangeSquaredTo(data.Wep)<50*50 then
 					self:SetupWeapon(data.Wep)
 				end
 			elseif result==false then
@@ -257,7 +272,7 @@ ENT.TaskList = {
 				return
 			end
 			
-			if !data.Pos or self.Target:GetPos():Distance(data.Pos)>50 then
+			if !data.Pos or self.Target:GetPos():DistToSqr(data.Pos)>50*50 then
 				data.Pos = self.Target:GetPos()
 				self:SetupPath(data.Pos)
 				
@@ -285,10 +300,11 @@ ENT.TaskList = {
 	},
 	["movement_followenemy"] = {
 		OnStart = function(self,data)
-			local pos = self:GetLastEnemyPosition(self:GetEnemy())
+			data.Enemy = self:GetEnemy()
+			data.Pos = self:GetLastEnemyPosition(data.Enemy)
 		
-			self:SetupPath(pos)
-			data.Walk = !self:CanSeePosition(pos) and self:GetRangeTo(pos)<2000
+			self:SetupPath(data.Pos,self:IsMeleeWeapon() and {tolerance = 75} or nil)
+			data.Walk = !self:CanSeePosition(data.Pos) and self:GetRangeSquaredTo(data.Pos)<2000*2000
 			
 			if !self:PathIsValid() then
 				self:TaskFail("movement_followenemy")
@@ -296,17 +312,37 @@ ENT.TaskList = {
 			end
 		end,
 		BehaveUpdate = function(self,data)
-			local result = self:ControlPath(!self.IsSeeEnemy)
+			local lastpos = self:GetEnemy()==data.Enemy and self:GetLastEnemyPosition(data.Enemy)
+			local newpos = lastpos and lastpos:DistToSqr(data.Pos)>50*50 and lastpos or data.Pos
 			
-			if result then
-				self:TaskComplete("movement_followenemy")
-				self:StartTask("movement_wait")
-			elseif result==false then
+			if IsValid(self.Target) and (!self:IsMeleeWeapon() or self.Target:GetPos():DistToSqr(newpos)>300*300) then
 				self:TaskFail("movement_followenemy")
-				self:StartTask("movement_wait",{Time = math.random(3,6)})
+				self:StartTask("movement_wait",{Time = 0.25})
 			else
-				if self.IsSeeEnemy then
+				if newpos!=data.Pos then
+					data.Pos = newpos
+					self:SetupPath(newpos,self:IsMeleeWeapon() and {tolerance = 75} or nil)
+					
+					if !self:PathIsValid() then
+						self:TaskFail("movement_followenemy")
+						self:StartTask("movement_wait")
+						
+						return
+					end
+				end
+				
+				if data.Walk and (self.IsSeeEnemy and self:GetEnemy()==data.Enemy or self:CanSeePosition(data.Pos)) then
 					data.Walk = false
+				end
+				
+				local result = self:ControlPath(!self.IsSeeEnemy)
+				
+				if result then
+					self:TaskComplete("movement_followenemy")
+					self:StartTask("movement_wait")
+				elseif result==false then
+					self:TaskFail("movement_followenemy")
+					self:StartTask("movement_wait",{Time = math.random(3,6)})
 				end
 			end
 		end,
@@ -376,6 +412,23 @@ ENT.TaskList = {
 			self:TaskFail("movement_custompos")
 		end,
 	},
+	["movement_meleecontrol"] = {
+		BehaveUpdate = function(self,data)
+			if !self:IsMeleeWeapon() or self:IsTaskActive("movement_followenemy") then return end
+			
+			if IsValid(self:GetEnemy()) and (!IsValid(self.Target) or self.Target:GetPos():DistToSqr(self:GetEnemy():GetPos())<300*300) then
+				self:TaskFail("movement_wait")
+				self:TaskFail("movement_followtarget")
+				self:TaskFail("movement_randomwalk")
+				self:TaskFail("movement_custompos")
+				
+				self:StartTask("movement_followenemy")
+			end
+		end,
+		StartControlByPlayer = function(self,data,ply)
+			self:TaskFail("movement_meleecontrol")
+		end,
+	},
 	["inform_handler"] = {
 		OnStart = function(self,data)
 			data.Inform = function(enemy,pos)
@@ -425,6 +478,8 @@ ENT.InformGroup = "Soldiers"
 
 local ENEMY_FRIENDLY,ENEMY_HOSTILE,ENEMY_MONSTER,ENEMY_NEUTRAL = 0,1,2,3
 ENEMY_CLASSES = {
+	-- HL2
+
 	npc_crow = ENEMY_NEUTRAL,
 	npc_monk = ENEMY_FRIENDLY,
 	npc_pigeon = ENEMY_NEUTRAL,
@@ -471,6 +526,30 @@ ENEMY_CLASSES = {
 	npc_antlion_worker = ENEMY_MONSTER,
 	npc_zombine = ENEMY_MONSTER,
 	npc_hunter = ENEMY_HOSTILE,
+
+	-- HL1
+
+	monster_alien_grunt = ENEMY_MONSTER,
+	monster_alien_slave = ENEMY_MONSTER,
+	monster_human_assassin = ENEMY_HOSTILE,
+	monster_babycrab = ENEMY_MONSTER,
+	monster_bullchicken = ENEMY_MONSTER,
+	monster_alien_controller = ENEMY_MONSTER,
+	monster_gargantua = ENEMY_MONSTER,
+	monster_bigmomma = ENEMY_MONSTER,
+	monster_human_grunt = ENEMY_HOSTILE,
+	monster_headcrab = ENEMY_MONSTER,
+	monster_cockroach = ENEMY_NEUTRAL,
+	monster_turret = ENEMY_HOSTILE,
+	monster_houndeye = ENEMY_MONSTER,
+	monster_miniturret = ENEMY_HOSTILE,
+	monster_nihilanth = ENEMY_MONSTER,
+	monster_scientist = ENEMY_FRIENDLY,
+	monster_barney = ENEMY_FRIENDLY,
+	monster_sentry = ENEMY_HOSTILE,
+	monster_snark = ENEMY_MONSTER,
+	monster_tentacle = ENEMY_MONSTER,
+	monster_zombie = ENEMY_MONSTER,
 }
 
 function ENT:Initialize()
@@ -498,7 +577,17 @@ function ENT:SetupRelationships()
 	end
 	
 	hook.Add("OnEntityCreated",self,function(self,ent)
-		self:SetupEntityRelationship(ent)
+		if ent:GetClass()=="npc_sniper" then
+			-- Snipers use D_NU disposition in first frame here.
+		
+			timer.Simple(0,function()
+				if IsValid(self) and IsValid(ent) then
+					self:SetupEntityRelationship(ent)
+				end
+			end)
+		else
+			self:SetupEntityRelationship(ent)
+		end
 	end)
 end
 
@@ -507,21 +596,25 @@ function ENT:SetupEntityRelationship(ent)
 	
 	if stdd then
 		local d = self:GetDesiredEnemyRelationship(ent,stdd)
-		self:SetEntityRelationship(ent,d,1)
+		self:SetEntityRelationship(ent,d)
 	
 		if ent:IsNPC() then
-			ent:AddEntityRelationship(self,d,1)
+			ent:AddEntityRelationship(self,d)
 		end
 	end
 end
 
 function ENT:BehaviourThink()
-	if self:PathIsValid() and !self:IsControlledByPlayer() and !self:DisableBehaviour() then
+	if !self:IsControlledByPlayer() and !self:DisableBehaviour() then
 		local filter = self:GetChildren()
 		filter[#filter+1] = self
 		
+		if IsValid(self:GetEnemy()) then
+			filter[#filter+1] = self:GetEnemy()
+		end
+		
 		local pos = self:GetShootPos()
-		local endpos = pos+self:GetAimVector()*100
+		local endpos = IsValid(self:GetEnemy()) and self:EntShootPos(self:GetEnemy()) or pos+self:GetEyeAngles():Forward()*100
 		local blocker = self:ShootBlocker(pos,endpos,filter)
 		
 		self.LastShootBlocker = blocker
@@ -546,30 +639,30 @@ function ENT:BehaviourThink()
 		self.LastShootBlocker = false
 	end
 	
-	//self.OnContactAllowed = true
+	self.OnContactAllowed = true
 end
 
-/*function ENT:OnContact(ent)
-	if self==ent or !self.OnContactAllowed then return end
-
-	local vel = ent:GetVelocity()
-
-	if !vel:IsZero() then
-		local pos = self:GetPos()
+function ENT:OnTouch(ent,trace)
+	if !self.OnContactAllowed then return end
 	
-		self.loco:Approach(pos+vel:GetNormalized()+(pos-ent:GetPos()):GetNormalized(),1)
+	local vel = ent:GetVelocity()
+	
+	if !vel:IsZero() and self:GetRelationship(ent)!=D_HT then
+		local pos = self:GetPos()
+		
+		self:Approach(pos+vel:GetNormalized()+(pos-ent:GetPos()):GetNormalized())
 		self.OnContactAllowed = false
 	end
-end*/
+end
 
 function ENT:FindWeapon()
-	local distlimit = 500
-	local searchrange = 3000
+	local distlimit = 500*500
+	local searchrange = 3000*3000
 	
 	local wep,range,weight
 
 	for k,v in ipairs(ents.GetAll()) do
-		local r = self:GetRangeTo(v)
+		local r = self:GetRangeSquaredTo(v)
 	
 		if r>searchrange or !self:CanPickupWeapon(v) or !self:CanSeePosition(v) then continue end
 		
@@ -602,6 +695,10 @@ function ENT:EntityIsFriendly(ent)
 		if (ent:GetClass()=="npc_antlion" or ent:GetClass()=="npc_antlion_worker") and game.GetGlobalState("antlion_allied")==GLOBAL_ON then
 			return true
 		end
+		
+		if ent:GetClass()=="npc_sniper" and IsValid(self.Target) and ent:Disposition(self.Target)==D_LI then
+			return true
+		end
 	end
 	
 	return ENEMY_CLASSES[ent:GetClass()]==ENEMY_FRIENDLY
@@ -625,7 +722,7 @@ function ENT:OnInjured(dmg)
 	local att = dmg:GetAttacker()
 	
 	if IsValid(att) and self:GetRelationship(att)==D_NU and (ENEMY_CLASSES[att:GetClass()] or att:IsPlayer()) then
-		self:SetEntityRelationship(att,D_HT,0)
+		self:SetEntityRelationship(att,D_HT)
 	end
 end
 
@@ -721,10 +818,11 @@ function ENT:SetupTasks()
 	self:StartTask("movement_handler")
 	self:StartTask("playercontrol_handler")
 	self:StartTask("inform_handler")
+	self:StartTask("movement_meleecontrol")
 end
 
 function ENT:SetupDefaultCapabilities()
 	BaseClass.SetupDefaultCapabilities(self)
 
-	self:CapabilitiesAdd(CAP_MOVE_JUMP)
+	self:CapabilitiesAdd(bit.bor(CAP_MOVE_JUMP, CAP_MOVE_CLIMB))
 end

@@ -19,10 +19,6 @@ end
 function ENT:BehaveUpdate(interval)
 	self.BehaveInterval = interval
 	
-	if self.m_Physguned then
-		self.loco:SetVelocity(vector_origin)
-	end
-	
 	self:StuckCheck()
 	
 	local disable = self:DisableBehaviour()
@@ -34,27 +30,22 @@ function ENT:BehaveUpdate(interval)
 		end
 	end
 	
-	self:SetupSpeed()
-	self:SetupMotionType()
-	self:ProcessFootsteps()
-	self.m_FallSpeed = -self.loco:GetVelocity().z
-	
 	if !disable then
 		self:SetupEyeAngles()
-		self:UpdatePhysicsObject()
 		self:ForgetOldEnemies()
 		
 		local ply = self:GetControlPlayer()
 		if IsValid(ply) then
 			-- Sending current weapon clips data
-		
+			
 			if self:HasWeapon() then
 				local wep = self:GetActiveWeapon()
-				
-				self:SetWeaponClip1(wep:Clip1())
-				self:SetWeaponClip2(wep:Clip2())
-				self:SetWeaponMaxClip1(wep:GetMaxClip1())
-				self:SetWeaponMaxClip2(wep:GetMaxClip2())
+				local clip1, clip2, maxclip1, maxclip2 = wep:Clip1(), wep:Clip2(), wep:GetMaxClip1(), wep:GetMaxClip2()
+
+				if self:GetWeaponClip1() != clip1 then self:SetWeaponClip1(clip1) end
+				if self:GetWeaponClip2() != clip2 then self:SetWeaponClip2(clip2) end
+				if self:GetWeaponMaxClip1() != maxclip1 then self:SetWeaponMaxClip1(maxclip1) end
+				if self:GetWeaponMaxClip2() != maxclip2 then self:SetWeaponMaxClip2(maxclip2) end
 			end
 			
 			-- Calling behavior think for player control
@@ -84,6 +75,9 @@ function ENT:BehaveUpdate(interval)
 	end
 	
 	self:SetupGesturePosture()
+
+	self:LocomotionUpdate(interval)
+	self.m_FallSpeed = -self.loco:GetVelocity().z
 end
 
 --[[------------------------------------
@@ -151,7 +145,7 @@ function ENT:BehaviourPlayerControlThink(ply)
 	
 	if f!=0 or r!=0 then
 		local eyeang = ply:EyeAngles()
-		eyeang.p = 0
+		if !self:IsUsingLadder() then eyeang.p = 0 end
 		eyeang.r = 0
 		local movedir = eyeang:Forward()*f-eyeang:Right()*r
 		
