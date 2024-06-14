@@ -301,8 +301,11 @@ function ENT:WeaponPrimaryAttack()
 	self:DoRangeGesture()
 	
 	if self:ShouldWeaponAttackUseBurst(wep) then
-		local bmin,bmax,frate = wep:GetNPCBurstSettings()
-		local rmin,rmax = wep:GetNPCRestTimes()
+		local bmin, bmax, frate = 1, 1, 1
+		if wep.GetNPCBurstSettings then bmin,bmax,frate = wep:GetNPCBurstSettings() end
+
+		local rmin,rmax = 0.33, 0.66
+		if wep.GetNPCRestTimes then rmin,rmax = wep:GetNPCRestTimes() end
 		
 		if data.BurstBullets==-1 then
 			data.BurstBullets = math.random(bmin,bmax)
@@ -318,7 +321,9 @@ function ENT:WeaponPrimaryAttack()
 			data.NextShootTime = math.max(CurTime()+frate,data.NextShootTime)
 		end
 	else
-		local bmin,bmax,frate = wep:GetNPCBurstSettings()
+		local bmin, bmax, frate = 1, 1, 1
+		if wep.GetNPCBurstSettings then bmin,bmax,frate = wep:GetNPCBurstSettings() end
+
 		data.NextShootTime = math.max(CurTime()+frate,data.NextShootTime)
 	end
 end
@@ -363,8 +368,12 @@ function ENT:GetAimVector()
 	local dir = self:GetEyeAngles():Forward()
 	
 	if self:HasWeapon() then
-		local deg = self:GetActiveLuaWeapon():GetNPCBulletSpread(self:GetCurrentWeaponProficiency())
-		deg = math.sin(math.rad(deg))/2
+		local wep = self:GetActiveLuaWeapon()
+		local spread = 15
+
+		if wep.GetNPCBulletSpread then spread = wep:GetNPCBulletSpread(self:GetCurrentWeaponProficiency()) end
+
+		local deg = math.sin(math.rad(spread))/2
 		
 		dir:Add(Vector(math.Rand(-deg,deg),math.Rand(-deg,deg),math.Rand(-deg,deg)))
 	end
