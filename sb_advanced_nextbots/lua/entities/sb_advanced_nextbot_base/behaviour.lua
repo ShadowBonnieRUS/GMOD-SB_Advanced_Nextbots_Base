@@ -32,7 +32,7 @@ function ENT:BehaveUpdate(interval)
 	
 	if !disable then
 		self:SetupEyeAngles()
-		self:ForgetOldEnemies()
+		self:UpdateEnemies()
 		
 		local ply = self:GetControlPlayer()
 		if IsValid(ply) then

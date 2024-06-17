@@ -211,12 +211,12 @@ function ENT:HaveEnemy()
 end
 
 --[[------------------------------------
-	Name: NEXTBOT:ForgetOldEnemies
-	Desc: (INTERNAL) Clears bot memory from enemies that not valid, not updating very long time or not should be enemy.
+	Name: NEXTBOT:UpdateEnemies
+	Desc: (INTERNAL) Updates memory about enemies.
 	Arg1: 
 	Ret1: 
 --]]------------------------------------
-function ENT:ForgetOldEnemies()
+function ENT:UpdateEnemies()
 	for k,v in pairs(self.m_EnemiesMemory) do
 		if !IsValid(k) or CurTime()-v.lastupdate>=self.ForgetEnemyTime or !self:ShouldBeEnemy(k) then
 			self:ClearEnemyMemory(k)
