@@ -347,14 +347,8 @@ local function PathCostGenerator(path, from, node, cap)
 	
 	if z < 0 and bit.band(cap, bit.bor(CAP_MOVE_GROUND, CAP_MOVE_JUMP)) != 0 then
 		local maxh = path.m_Bot.loco:GetDeathDropHeight()
-		local h = -z
 		
-		if h > maxh then
-			local dist = math.Distance(frompos.x, frompos.y, nodepos.x, nodepos.y)
-			local ang = math.deg(math.atan(h / dist))
-			
-			if ang > 60 then return -1 end
-		end
+		if z < -maxh then return -1 end
 	end
 
 	if bit.band(cap, CAP_MOVE_CLIMB) != 0 then
