@@ -113,15 +113,26 @@ end
 
 --[[------------------------------------
 	Name: NEXTBOT:CanSeePosition
-	Desc: Line of sight test. Returns should we see that position.
+	Desc: Line of sight test. Returns should we see that position. If position is known enemy, it optimize calls using one frame cache.
 	Arg1: Vector | pos | Position to test. Can be also Entity, in this case will be used NEXTBOT:EntShootPos position.
 	Ret1: bool | Bot see position or not.
 --]]------------------------------------
 function ENT:CanSeePosition(pos)
+	local memory = self.m_EnemiesMemory[pos]
+	if memory and memory.lastvisupdate == CurTime() then
+		return memory.visible
+	end
+
 	local p = isentity(pos) and self:EntShootPos(pos) or pos
 	local tr = util.TraceLine({start = self:GetShootPos(),endpos = p,mask = self.LineOfSightMask,filter = self})
-	
-	return !tr.Hit or isentity(pos) and tr.Entity==pos
+	local visible = !tr.Hit or isentity(pos) and tr.Entity==pos
+
+	if memory then
+		memory.lastvisupdate = CurTime()
+		memory.visible = visible
+	end
+
+	return visible
 end
 
 --[[------------------------------------
@@ -129,12 +140,23 @@ end
 	Desc: Updates bot's memory of this enemy.
 	Arg1: Entity | enemy | Enemy to update.
 	Arg2: Vector | pos | Position where bot see enemy.
+	Arg3: (optional) bool | visible | Is bot see enemy or not, default is false.
 	Ret1: 
 --]]------------------------------------
-function ENT:UpdateEnemyMemory(enemy,pos)
-	self.m_EnemiesMemory[enemy] = self.m_EnemiesMemory[enemy] or {}
-	self.m_EnemiesMemory[enemy].lastupdate = CurTime()
-	self.m_EnemiesMemory[enemy].pos = pos
+function ENT:UpdateEnemyMemory(enemy, pos, visible)
+	local memory = self.m_EnemiesMemory[enemy]
+	if !memory then
+		memory = {}
+		self.m_EnemiesMemory[enemy] = memory
+	end
+
+	memory.lastupdate = CurTime()
+	memory.pos = pos
+	memory.visible = visible
+
+	if visible then
+		memory.lastvisupdate = CurTime()
+	end
 end
 
 --[[------------------------------------
