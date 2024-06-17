@@ -32,8 +32,7 @@ function ENT:RunTask(event,...)
 	local m_ActiveTasks = self.m_ActiveTasks
 	local m_TaskList = self.m_TaskList
 	local PassedTasks = {}
-	
-	local t = SysTime()
+
 	local k = 1
 	while true do
 		local task = callbacks[k]
