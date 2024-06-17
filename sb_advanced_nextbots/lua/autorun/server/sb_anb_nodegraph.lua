@@ -311,6 +311,11 @@ local function DevMsg(msg) Msg("SBAdvancedNextbotNodeGraph: ",msg) end
 local function ThrowError(msg) error("SBAdvancedNextbotNodeGraph: "..msg,2) end
 local function AssertValid(self) if !self:IsValid() then ThrowError("Attempt to use "..tostring(self)) end end
 
+local band = bit.band
+local bor = bit.bor
+local bnot = bit.bnot
+local lshift = bit.lshift
+
 local function NewObject(meta)
 	local obj = newproxy()
 	local data = setmetatable({},{__index = meta.__index})
@@ -345,22 +350,22 @@ local function PathCostGenerator(path, from, node, cap)
 	local cost = frompos:Distance(nodepos)
 	local z = nodepos.z - frompos.z
 	
-	if z < 0 and bit.band(cap, bit.bor(CAP_MOVE_GROUND, CAP_MOVE_JUMP)) != 0 then
+	if z < 0 and band(cap, bor(CAP_MOVE_GROUND, CAP_MOVE_JUMP)) != 0 then
 		local maxh = path.m_Bot.loco:GetDeathDropHeight()
 		
 		if z < -maxh then return -1 end
 	end
 
-	if bit.band(cap, CAP_MOVE_CLIMB) != 0 then
+	if band(cap, CAP_MOVE_CLIMB) != 0 then
 		return cost * (z > 0 and 0.5 or 4)
 	end
 	
-	if bit.band(cap, CAP_MOVE_JUMP) != 0 then
+	if band(cap, CAP_MOVE_JUMP) != 0 then
 		local maxh = path.m_Bot.loco:GetJumpHeight()
 		if z >= maxh then return -1 end
 		
 		return cost * 5
-	elseif bit.band(cap, bit.bor(CAP_MOVE_GROUND, CAP_MOVE_FLY)) != 0 then
+	elseif band(cap, bor(CAP_MOVE_GROUND, CAP_MOVE_FLY)) != 0 then
 		return cost
 	end
 	
@@ -421,15 +426,15 @@ local function GetLinkCapabilities(link, from, to, botdata)
 	local hull, duckhull = botdata.hull, botdata.duckhull
 	local bcap, movetypes = botdata.cap, link.m_AcceptedMoveTypes
 
-	local cap, duck = bit.band(movetypes[hull], bcap), false
+	local cap, duck = band(movetypes[hull], bcap), false
 	if cap == 0 then
-		cap, duck = bit.band(movetypes[duckhull], bcap), true
+		cap, duck = band(movetypes[duckhull], bcap), true
 	end
 
 	if cap == 0 then
 		duck = false
 
-		if bit.band(bcap, CAP_MOVE_GROUND) != 0 && bit.band(bit.bor(movetypes[hull], movetypes[duckhull]), CAP_MOVE_JUMP) != 0 then
+		if band(bcap, CAP_MOVE_GROUND) != 0 && band(bor(movetypes[hull], movetypes[duckhull]), CAP_MOVE_JUMP) != 0 then
 			local delta = to:GetOrigin() - from:GetOrigin()
 
 			if delta.z < 0 && delta.z > -botdata.deathdrop then
@@ -437,7 +442,7 @@ local function GetLinkCapabilities(link, from, to, botdata)
 				local ang = math.deg(math.atan(-delta.z / len))
 				
 				if ang > 50 then
-					cap, duck = CAP_MOVE_GROUND, bit.band(movetypes[hull], CAP_MOVE_JUMP) == 0
+					cap, duck = CAP_MOVE_GROUND, band(movetypes[hull], CAP_MOVE_JUMP) == 0
 				end
 			end
 		end
@@ -459,13 +464,13 @@ end
 local function GetCapForOutsideSegment(pos, from, to, goal, botdata)
 	local cap, duck = GetCapBetweenNodes(from, to, botdata)
 
-	if bit.band(cap, CAP_MOVE_CLIMB) != 0 then
+	if band(cap, CAP_MOVE_CLIMB) != 0 then
 		if botdata.ladder then return end
 
 		return CAP_MOVE_GROUND, duck
-	elseif bit.band(cap, CAP_MOVE_JUMP) != 0 then
+	elseif band(cap, CAP_MOVE_JUMP) != 0 then
 		return CAP_MOVE_GROUND, duck
-	elseif bit.band(cap, CAP_MOVE_GROUND) != 0 then
+	elseif band(cap, CAP_MOVE_GROUND) != 0 then
 		local dist = from:GetOrigin():DistToSqr(to:GetOrigin())
 		local range = pos:DistToSqr(goal and from:GetOrigin() or to:GetOrigin())
 
@@ -476,9 +481,9 @@ local function GetCapForOutsideSegment(pos, from, to, goal, botdata)
 end
 
 local function TranslateCapToPathSegmentType(cap, duckonly, start, goal)
-	if bit.band(cap, CAP_MOVE_JUMP) != 0 then
+	if band(cap, CAP_MOVE_JUMP) != 0 then
 		return PATH_SEGMENT_MOVETYPE_JUMPING
-	elseif bit.band(cap, CAP_MOVE_CLIMB) != 0 then
+	elseif band(cap, CAP_MOVE_CLIMB) != 0 then
 		if goal.z != start.z then
 			return goal.z > start.z and PATH_SEGMENT_MOVETYPE_LADDERUP or PATH_SEGMENT_MOVETYPE_LADDERDOWN
 		end
@@ -809,9 +814,9 @@ local CAI_DynamicLink = {
 				link.dlink = self
 				
 				if self.m_LinkState==LINK_OFF then
-					link.m_info = bit.bor(link.m_info,bits_LINK_OFF)
+					link.m_info = bor(link.m_info, bits_LINK_OFF)
 				else
-					link.m_info = bit.band(link.m_info,bit.bnot(bits_LINK_OFF))
+					link.m_info = band(link.m_info, bnot(bits_LINK_OFF))
 				end
 			else
 				DevMsg("Dynamic Link Error: "..tostring(self.dlink).." unable to form between nodes "..self.m_SrcID.." and "..self.m_DestID.."\n")
@@ -859,7 +864,7 @@ local CAI_Hint = {
 	SetName = function(self, name) self.m_Name = name end,
 	GetName = function(self) return self.m_Name end,
 
-	AddSpawnFlags = function(self, flags) self.m_SpawnFlags = bit.bor(self.m_SpawnFlags, flags) end,
+	AddSpawnFlags = function(self, flags) self.m_SpawnFlags = bor(self.m_SpawnFlags, flags) end,
 	GetSpawnFlags = function(self) return self.m_SpawnFlags end,
 }
 
@@ -887,15 +892,15 @@ local SearchList = {
 	
 	PopOpenList = function(self)
 		local node, cost
-		
+
 		for cnode, _ in pairs(self.Opened) do
 			local ccost = self.TotalCost[cnode]
-			
+
 			if !cost or ccost < cost then
 				node, cost = cnode, ccost
 			end
 		end
-		
+
 		self.Opened[node] = nil
 		self.NumOpened = self.NumOpened - 1
 		
@@ -976,7 +981,7 @@ local PathFollower = {
 		
 		local list = NewObject({__index = SearchList})
 		list:_initialize()
-		
+
 		list:SetCostSoFar(from,0)
 		list:SetTotalCost(from,from:GetOrigin():Distance(to:GetOrigin()))
 		
@@ -990,12 +995,10 @@ local PathFollower = {
 				return self:_Construct(nodes, from, to, start, goal, botdata)
 			end
 			
-			list:AddToClosedList(node)
-			
 			for i=0,node:_NumLinks()-1 do
 				local link = node:_GetLink(i)
 				
-				if bit.band(link.m_info,bits_LINK_OFF)!=0 then
+				if band(link.m_info,bits_LINK_OFF)!=0 then
 					local dlink = link.dlink
 					
 					if !dlink or !dlink:IsValid() or dlink:GetStrAllowUse()=="" then
@@ -1837,7 +1840,7 @@ function Load()
 			continue
 		end
 		
-		if bit.band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)!=0 then
+		if band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)!=0 then
 			local link = dlink:FindLink()
 			
 			if !link then
@@ -1856,10 +1859,10 @@ function Load()
 			if link then
 				link.dlink = dlink
 			
-				local hullbits = bit.band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)
+				local hullbits = band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)
 				
 				for i=0,NUM_HULLS-1 do
-					if bit.band(hullbits,bit.lshift(1,i))!=0 then
+					if band(hullbits,lshift(1,i))!=0 then
 						link.m_AcceptedMoveTypes[i] = dlink.m_LinkType
 					end
 				end
@@ -2031,24 +2034,24 @@ timer.Create("sb_anb_nodegraph_drawnodes",1,0,function()
 			
 			r,g,b = 255,0,0
 			
-			if bit.band(linkinfo,bits_LINK_STALE_SUGGESTED)!=0 then
+			if band(linkinfo,bits_LINK_STALE_SUGGESTED)!=0 then
 				r,g,b = 255,0,0
-			elseif bit.band(linkinfo,bits_LINK_OFF)!=0 then
+			elseif band(linkinfo,bits_LINK_OFF)!=0 then
 				r,g,b = 100,100,100
-			elseif bit.band(movetype,CAP_MOVE_FLY)!=0 then
+			elseif band(movetype,CAP_MOVE_FLY)!=0 then
 				r,g,b = 100,255,255
-			elseif bit.band(movetype,CAP_MOVE_CLIMB)!=0 then
+			elseif band(movetype,CAP_MOVE_CLIMB)!=0 then
 				r,g,b = 255,0,255
-			elseif bit.band(movetype,CAP_MOVE_GROUND)!=0 then
+			elseif band(movetype,CAP_MOVE_GROUND)!=0 then
 				r,g,b = 0,255,50
-			elseif bit.band(movetype,CAP_MOVE_JUMP)!=0 then
+			elseif band(movetype,CAP_MOVE_JUMP)!=0 then
 				r,g,b = 0,0,255
 			else
 				local fly = node:GetType()==NODE_AIR or dest:GetType()==NODE_AIR
 				local jump = true
 				
 				for k=HULL_HUMAN,NUM_HULLS-1 do
-					if bit.band(link.m_AcceptedMoveTypes[k],bit.bnot(CAP_MOVE_JUMP))!=0 then
+					if band(link.m_AcceptedMoveTypes[k],bnot(CAP_MOVE_JUMP))!=0 then
 						jump = false
 						break
 					end
