@@ -928,7 +928,7 @@ local SearchList = {
 	end,
 	
 	RemoveFromClosedList = function(self,node)
-		self.Closed[node] = nil
+		//self.Closed[node] = nil
 	end,
 }
 
@@ -977,9 +977,11 @@ local PathFollower = {
 		local list = NewObject({__index = SearchList})
 		list:_initialize()
 		
-		list:AddToOpenList(from)
 		list:SetCostSoFar(from,0)
 		list:SetTotalCost(from,from:GetOrigin():Distance(to:GetOrigin()))
+		
+		list:AddToOpenList(from)
+		list:AddToClosedList(from)
 		
 		while !list:IsOpenListEmpty() do
 			local node = list:PopOpenList()
@@ -1027,13 +1029,8 @@ local PathFollower = {
 					list:SetCostSoFar(neighbor, newcost)
 					list:SetTotalCost(neighbor, newcost + neighbor:GetOrigin():Distance(to:GetOrigin()))
 					
-					if !list:IsOpen(neighbor) then
-						list:AddToOpenList(neighbor)
-					end
-					
-					if list:IsClosed(neighbor) then
-						list:RemoveFromClosedList(neighbor)
-					end
+					if !list:IsOpen(neighbor) then list:AddToOpenList(neighbor) end
+					list:AddToClosedList(neighbor)
 					
 					nodes[neighbor] = node
 				end
