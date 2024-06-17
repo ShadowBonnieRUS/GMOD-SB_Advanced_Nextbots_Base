@@ -164,10 +164,10 @@ function ENT:FindEnemies()
 	local UpdateEnemyMemory = self.UpdateEnemyMemory
 	local EntShootPos = self.EntShootPos
 
-	for k,v in ents.Iterator() do
+	for k,v in next, ents.FindInSphere(self:GetPos(), self.MaxSeeEnemyDistance) do
 		if v==self or !ShouldBeEnemy(self,v) or !CanSeePosition(self,v) then continue end
 		
-		UpdateEnemyMemory(self,v,EntShootPos(self,v))
+		UpdateEnemyMemory(self,v,EntShootPos(self,v), true)
 	end
 end
 
