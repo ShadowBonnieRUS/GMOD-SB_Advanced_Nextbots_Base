@@ -886,18 +886,18 @@ local SearchList = {
 	end,
 	
 	PopOpenList = function(self)
-		local node,cost
+		local node, cost
 		
-		for k,v in pairs(self.Opened) do
-			local c = self.TotalCost[k]
+		for cnode, _ in pairs(self.Opened) do
+			local ccost = self.TotalCost[cnode]
 			
-			if !cost or c<cost then
-				node,cost = k,c
+			if !cost or ccost < cost then
+				node, cost = cnode, ccost
 			end
 		end
 		
 		self.Opened[node] = nil
-		self.NumOpened = self.NumOpened-1
+		self.NumOpened = self.NumOpened - 1
 		
 		return node
 	end,
@@ -907,16 +907,16 @@ local SearchList = {
 	end,
 	
 	IsOpen = function(self,node)
-		return self.Opened[node]==true
+		return self.Opened[node] == true
 	end,
 	
 	AddToOpenList = function(self,node)
 		self.Opened[node] = true
-		self.NumOpened = self.NumOpened+1
+		self.NumOpened = self.NumOpened + 1
 	end,
 	
 	IsClosed = function(self,node)
-		return self.Closed[node]==true
+		return self.Closed[node] == true
 	end,
 	
 	SetCostSoFar = function(self,node,cost)
