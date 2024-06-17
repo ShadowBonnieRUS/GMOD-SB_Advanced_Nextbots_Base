@@ -463,12 +463,12 @@ end
 function ENT:LocomotionUpdate(interval)
 	self:UpdatePhysicsObject()
 
-	if self.m_FallPostVelocity then
+	--[[ if self.m_FallPostVelocity then
 		-- Seems landing on ground sets our velocity to 0, so restore it here
 
 		self.loco:SetVelocity(self.m_FallPostVelocity)
 		self.m_FallPostVelocity = nil
-	end
+	end ]]
 
 	if self.m_Physguned then
 		self.loco:SetVelocity(vector_origin)
@@ -1284,7 +1284,7 @@ function ENT:OnLandOnGround(ent)
 		self:SetupCollisionBounds()
 	end
 
-	self.m_FallPostVelocity = self.loco:GetVelocity()
+	//self.m_FallPostVelocity = self.loco:GetVelocity()
 	
 	local fallspeed = self.m_FallSpeed
 	if fallspeed >= 300 then
