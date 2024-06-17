@@ -2100,9 +2100,6 @@ hook.Add("Initialize", "sb_anb_nodegraph_hints", function()
 			if ent:GetInternalVariable("hinttype") != 0 || ent:GetInternalVariable("Group") != "" || ent:GetName() != "" then
 				hint = CreateHint(ent, HintNodeCount)
 				hint:AddSpawnFlags(ent:GetSpawnFlags())
-
-				print(ent)
-				PrintTable(ent:GetSaveTable(true))
 			end
 		end
 
