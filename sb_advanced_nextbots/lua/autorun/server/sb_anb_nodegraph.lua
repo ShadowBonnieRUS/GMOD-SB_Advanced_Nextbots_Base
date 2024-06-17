@@ -1546,8 +1546,11 @@ local PathFollower = {
 					dir:Normalize()
 
 					bot:Approach(curpos + dir * 100)
+				elseif istable(result) then
+					bot:JumpToPos(result.pos, result.height)
 				else
-					// We failed to calc jump height, don't move to prevent stuck or something
+					// We failed to calc jump height, but we still need moving along path, jump as is
+					bot:JumpToPos(goalpos, bot.MaxJumpToPosHeight)
 				end
 			end
 		end
