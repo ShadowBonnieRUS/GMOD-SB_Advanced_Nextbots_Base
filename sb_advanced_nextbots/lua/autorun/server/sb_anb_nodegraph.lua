@@ -329,7 +329,7 @@ local function NewObject(meta)
 	return obj
 end
 
-local function PathCostGenerator(path, from, node, cap)
+local function PathCostGenerator(path, from, node, cap, botdata)
 	if path.m_customcostgen then
 		local success, cost = pcall(path.m_customcostgen, node, from, cap)
 		
@@ -344,16 +344,14 @@ local function PathCostGenerator(path, from, node, cap)
 	
 	if !from then return 0 end
 	
-	local frompos = from:GetOrigin()
-	local nodepos = node:GetOrigin()
+	local frompos = from.m_origin
+	local nodepos = node.m_origin
 	
 	local cost = frompos:Distance(nodepos)
 	local z = nodepos.z - frompos.z
 	
-	if z < 0 and band(cap, bor(CAP_MOVE_GROUND, CAP_MOVE_JUMP)) != 0 then
-		local maxh = path.m_Bot.loco:GetDeathDropHeight()
-		
-		if z < -maxh then return -1 end
+	if z < -botdata.deathdrop and band(cap, CAP_MOVE_JUMP) != 0 then
+		return -1
 	end
 
 	if band(cap, CAP_MOVE_CLIMB) != 0 then
@@ -361,8 +359,7 @@ local function PathCostGenerator(path, from, node, cap)
 	end
 	
 	if band(cap, CAP_MOVE_JUMP) != 0 then
-		local maxh = path.m_Bot.loco:GetJumpHeight()
-		if z >= maxh then return -1 end
+		if z >= botdata.jump then return -1 end
 		
 		return cost * 5
 	elseif band(cap, bor(CAP_MOVE_GROUND, CAP_MOVE_FLY)) != 0 then
@@ -435,7 +432,7 @@ local function GetLinkCapabilities(link, from, to, botdata)
 		duck = false
 
 		if band(bcap, CAP_MOVE_GROUND) != 0 && band(bor(movetypes[hull], movetypes[duckhull]), CAP_MOVE_JUMP) != 0 then
-			local delta = to:GetOrigin() - from:GetOrigin()
+			local delta = to.m_origin - from.m_origin
 
 			if delta.z < 0 && delta.z > -botdata.deathdrop then
 				local len = math.sqrt(delta.x * delta.x + delta.y * delta.y)
@@ -983,7 +980,7 @@ local PathFollower = {
 		list:_initialize()
 
 		list:SetCostSoFar(from,0)
-		list:SetTotalCost(from,from:GetOrigin():Distance(to:GetOrigin()))
+		list:SetTotalCost(from,from.m_origin:Distance(to.m_origin))
 		
 		list:AddToOpenList(from)
 		list:AddToClosedList(from)
@@ -995,8 +992,8 @@ local PathFollower = {
 				return self:_Construct(nodes, from, to, start, goal, botdata)
 			end
 			
-			for i=0,node:_NumLinks()-1 do
-				local link = node:_GetLink(i)
+			for i = 0, node.m_NumLinks - 1 do
+				local link = node.m_links[i]
 				
 				if band(link.m_info,bits_LINK_OFF)!=0 then
 					local dlink = link.dlink
@@ -1023,14 +1020,14 @@ local PathFollower = {
 				local curcap, duck = GetLinkCapabilities(link, node, neighbor, botdata)
 				if curcap == 0 then continue end
 				
-				local cost = PathCostGenerator(self, node, neighbor, curcap)
+				local cost = PathCostGenerator(self, node, neighbor, curcap, botdata)
 				if cost < 0 then continue end
 				
 				local newcost = list:GetCostSoFar(node) + cost
 				
 				if !list:IsClosed(neighbor) or newcost < list:GetCostSoFar(neighbor) then
 					list:SetCostSoFar(neighbor, newcost)
-					list:SetTotalCost(neighbor, newcost + neighbor:GetOrigin():Distance(to:GetOrigin()))
+					list:SetTotalCost(neighbor, newcost + neighbor.m_origin:Distance(to.m_origin))
 					
 					if !list:IsOpen(neighbor) then list:AddToOpenList(neighbor) end
 					list:AddToClosedList(neighbor)
@@ -1118,9 +1115,10 @@ local PathFollower = {
 			duckhull = bot:GetDuckHullType(),
 			mask = bot:GetSolidMask(),
 			step = bot.loco:GetStepHeight(),
+			jump = bot.loco:GetJumpHeight(),
+			deathdrop = bot.loco:GetDeathDropHeight(),
 			bounds = {Vector(bot.CollisionBounds[1]), Vector(bot.CollisionBounds[2])},
 			cbounds = {Vector(bot.CrouchCollisionBounds[1]), Vector(bot.CrouchCollisionBounds[2])},
-			deathdrop = bot.loco:GetDeathDropHeight(),
 			ladder = bot.m_Ladder,
 			filter = bot:GetChildren(),
 		}
