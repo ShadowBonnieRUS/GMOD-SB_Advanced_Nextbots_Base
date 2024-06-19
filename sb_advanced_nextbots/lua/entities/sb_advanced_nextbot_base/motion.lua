@@ -463,12 +463,12 @@ end
 function ENT:LocomotionUpdate(interval)
 	self:UpdatePhysicsObject()
 
-	if self.m_FallPostVelocity then
+	--[[ if self.m_FallPostVelocity then
 		-- Seems landing on ground sets our velocity to 0, so restore it here
 
 		self.loco:SetVelocity(self.m_FallPostVelocity)
 		self.m_FallPostVelocity = nil
-	end
+	end ]]
 
 	if self.m_Physguned then
 		self.loco:SetVelocity(vector_origin)
@@ -866,11 +866,9 @@ function ENT:ComputePath(pos,generator)
 		local ang = self:GetAngles()
 		path:Update(self)
 		self:SetAngles(ang)
-		
-		return path:IsValid()
 	end
 	
-	return false
+	return path:IsValid()
 end
 
 --[[------------------------------------
@@ -1182,8 +1180,11 @@ function ENT:MoveAlongPath(lookatgoal)
 						dir:Normalize()
 
 						self:Approach(pos + dir * 100)
+					elseif istable(result) then
+						self:JumpToPos(result.pos, result.height)
 					else
-						// We failed to calc jump height, don't move to prevent stuck or something
+						// We failed to calc jump height, but we still need moving along path, jump as is
+						self:JumpToPos(segment.pos, self.MaxJumpToPosHeight)
 					end
 
 					dontupdate = true
@@ -1284,7 +1285,7 @@ function ENT:OnLandOnGround(ent)
 		self:SetupCollisionBounds()
 	end
 
-	self.m_FallPostVelocity = self.loco:GetVelocity()
+	//self.m_FallPostVelocity = self.loco:GetVelocity()
 	
 	local fallspeed = self.m_FallSpeed
 	if fallspeed >= 300 then
@@ -1653,11 +1654,19 @@ end
 	Arg1: Vector | goal | Goal position.
 	Arg2: (optional) number | maxheight | Maximum jump height allowed in calculations. Default is NEXTBOT.MaxJumpToPosHeight.
 	Arg3: (optional) Vector | start | Overrides start position. Default is bot's current position.
-	Ret1: number | On success, calculated jump height. On failed, returns `nil` if calculations failed, `false` if jump height is greater than allowed, `true` if we are too close to obstacle and cannot jump now correctly.
+	Ret1: any
+		number | On success, calculated jump height.
+		true | On success, but we are too close to obstacle and cannot jump now correctly.
+		table | On success, but obstacle blocks jump from our position to goal, returns data to jump on obstacle:
+			`pos` - obstacle apex position.
+			`height` - jump height for jumping to apex.
+		nothing | On calculations failed.
 --]]------------------------------------
 function ENT:CalcJumpHeightOverObstacles(goal, maxheight, start)
 	maxheight = maxheight or self.MaxJumpToPosHeight
 	start = start or self:GetPos()
+
+	if goal.z - start.z > maxheight then return end
 
 	local bounds = self.CanCrouch and self.CrouchCollisionBounds or self.CollisionBounds
 	local mins, maxs = Vector(bounds[1]), bounds[2]
@@ -1774,8 +1783,13 @@ function ENT:CalcJumpHeightOverObstacles(goal, maxheight, start)
 			local height = (jumpapex.z - start.z) / fr
 
 			if height > maxheight then
-				debugoverlay.Sphere(Vector(jumpapex.x, jumpapex.y, start.z + height), tolerance, 0.1, Color(255, 0, 0))
-				return false
+				local firstapex = apexs[1]
+				if !firstapex then return end
+				
+				local pos = (firstapex.start + firstapex.endpos) / 2
+				debugoverlay.Sphere(pos, tolerance, 0.1, Color(255, 155, 0))
+
+				return {pos = pos, height = pos.z - start.z}
 			end
 
 			debugoverlay.Sphere(jumpapex, tolerance, 0.1, Color(0, 0, 255))
@@ -1821,9 +1835,9 @@ function ENT:JumpToPos(pos,height)
 	local t = t1 + t2
 	
 	self:Jump()
-	self.loco:SetVelocity(Vector(dir.x*dist/t,dir.y*dist/t,math.sqrt(2 *g * h1)))
+	self.loco:SetVelocity(Vector(dir.x*dist/t,dir.y*dist/t,math.sqrt(2 * g * h1)))
 	
-	self.m_JumpingToPos = true
+	self.m_JumpingToPos = true 
 end
 
 hook.Add("OnPhysgunPickup","SBAdvancedNextBots",function(ply,ent)

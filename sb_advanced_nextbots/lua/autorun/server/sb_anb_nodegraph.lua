@@ -304,12 +304,18 @@ local sb_anb_nodegraph_drawnodes = CreateConVar("sb_anb_nodegraph_drawnodes","0"
 local sb_anb_nodegraph_drawnodes_hull = CreateConVar("sb_anb_nodegraph_drawnodes_hull","0", FCVAR_ARCHIVE)
 local sb_anb_nodegraph_pathdebug = CreateConVar("sb_anb_nodegraph_pathdebug","0", FCVAR_ARCHIVE)
 local sb_anb_nodegraph_accurategetnearestnode = CreateConVar("sb_anb_nodegraph_accurategetnearestnode","1", FCVAR_ARCHIVE)
+local sb_anb_nodegraph_getnearestnodevischeck = CreateConVar("sb_anb_nodegraph_getnearestnodevischeck","0", FCVAR_ARCHIVE)
 local sb_anb_nodegraph_trivialcheck = CreateConVar("sb_anb_nodegraph_trivialcheck","1", FCVAR_ARCHIVE)
 local sb_anb_nodegraph_trivialcheck_debug = CreateConVar("sb_anb_nodegraph_trivialcheck_debug","0", FCVAR_ARCHIVE)
 
 local function DevMsg(msg) Msg("SBAdvancedNextbotNodeGraph: ",msg) end
 local function ThrowError(msg) error("SBAdvancedNextbotNodeGraph: "..msg,2) end
 local function AssertValid(self) if !self:IsValid() then ThrowError("Attempt to use "..tostring(self)) end end
+
+local band = bit.band
+local bor = bit.bor
+local bnot = bit.bnot
+local lshift = bit.lshift
 
 local function NewObject(meta)
 	local obj = newproxy()
@@ -324,7 +330,7 @@ local function NewObject(meta)
 	return obj
 end
 
-local function PathCostGenerator(path, from, node, cap)
+local function PathCostGenerator(path, from, node, cap, botdata)
 	if path.m_customcostgen then
 		local success, cost = pcall(path.m_customcostgen, node, from, cap)
 		
@@ -339,34 +345,25 @@ local function PathCostGenerator(path, from, node, cap)
 	
 	if !from then return 0 end
 	
-	local frompos = from:GetOrigin()
-	local nodepos = node:GetOrigin()
+	local frompos = from.m_origin
+	local nodepos = node.m_origin
 	
 	local cost = frompos:Distance(nodepos)
 	local z = nodepos.z - frompos.z
 	
-	if z < 0 and bit.band(cap, bit.bor(CAP_MOVE_GROUND, CAP_MOVE_JUMP)) != 0 then
-		local maxh = path.m_Bot.loco:GetDeathDropHeight()
-		local h = -z
-		
-		if h > maxh then
-			local dist = math.Distance(frompos.x, frompos.y, nodepos.x, nodepos.y)
-			local ang = math.deg(math.atan(h / dist))
-			
-			if ang > 60 then return -1 end
-		end
+	if z < -botdata.deathdrop and band(cap, CAP_MOVE_JUMP) != 0 then
+		return -1
 	end
 
-	if bit.band(cap, CAP_MOVE_CLIMB) != 0 then
+	if band(cap, CAP_MOVE_CLIMB) != 0 then
 		return cost * (z > 0 and 0.5 or 4)
 	end
 	
-	if bit.band(cap, CAP_MOVE_JUMP) != 0 then
-		local maxh = path.m_Bot.loco:GetJumpHeight()
-		if z >= maxh then return -1 end
+	if band(cap, CAP_MOVE_JUMP) != 0 then
+		if z >= botdata.jump then return -1 end
 		
 		return cost * 5
-	elseif bit.band(cap, bit.bor(CAP_MOVE_GROUND, CAP_MOVE_FLY)) != 0 then
+	elseif band(cap, bor(CAP_MOVE_GROUND, CAP_MOVE_FLY)) != 0 then
 		return cost
 	end
 	
@@ -427,23 +424,23 @@ local function GetLinkCapabilities(link, from, to, botdata)
 	local hull, duckhull = botdata.hull, botdata.duckhull
 	local bcap, movetypes = botdata.cap, link.m_AcceptedMoveTypes
 
-	local cap, duck = bit.band(movetypes[hull], bcap), false
+	local cap, duck = band(movetypes[hull], bcap), false
 	if cap == 0 then
-		cap, duck = bit.band(movetypes[duckhull], bcap), true
+		cap, duck = band(movetypes[duckhull], bcap), true
 	end
 
 	if cap == 0 then
 		duck = false
 
-		if bit.band(bcap, CAP_MOVE_GROUND) != 0 && bit.band(bit.bor(movetypes[hull], movetypes[duckhull]), CAP_MOVE_JUMP) != 0 then
-			local delta = to:GetOrigin() - from:GetOrigin()
+		if band(bcap, CAP_MOVE_GROUND) != 0 && band(bor(movetypes[hull], movetypes[duckhull]), CAP_MOVE_JUMP) != 0 then
+			local delta = to.m_origin - from.m_origin
 
 			if delta.z < 0 && delta.z > -botdata.deathdrop then
 				local len = math.sqrt(delta.x * delta.x + delta.y * delta.y)
 				local ang = math.deg(math.atan(-delta.z / len))
 				
 				if ang > 50 then
-					cap, duck = CAP_MOVE_GROUND, bit.band(movetypes[hull], CAP_MOVE_JUMP) == 0
+					cap, duck = CAP_MOVE_GROUND, band(movetypes[hull], CAP_MOVE_JUMP) == 0
 				end
 			end
 		end
@@ -465,13 +462,13 @@ end
 local function GetCapForOutsideSegment(pos, from, to, goal, botdata)
 	local cap, duck = GetCapBetweenNodes(from, to, botdata)
 
-	if bit.band(cap, CAP_MOVE_CLIMB) != 0 then
+	if band(cap, CAP_MOVE_CLIMB) != 0 then
 		if botdata.ladder then return end
 
 		return CAP_MOVE_GROUND, duck
-	elseif bit.band(cap, CAP_MOVE_JUMP) != 0 then
+	elseif band(cap, CAP_MOVE_JUMP) != 0 then
 		return CAP_MOVE_GROUND, duck
-	elseif bit.band(cap, CAP_MOVE_GROUND) != 0 then
+	elseif band(cap, CAP_MOVE_GROUND) != 0 then
 		local dist = from:GetOrigin():DistToSqr(to:GetOrigin())
 		local range = pos:DistToSqr(goal and from:GetOrigin() or to:GetOrigin())
 
@@ -482,9 +479,9 @@ local function GetCapForOutsideSegment(pos, from, to, goal, botdata)
 end
 
 local function TranslateCapToPathSegmentType(cap, duckonly, start, goal)
-	if bit.band(cap, CAP_MOVE_JUMP) != 0 then
+	if band(cap, CAP_MOVE_JUMP) != 0 then
 		return PATH_SEGMENT_MOVETYPE_JUMPING
-	elseif bit.band(cap, CAP_MOVE_CLIMB) != 0 then
+	elseif band(cap, CAP_MOVE_CLIMB) != 0 then
 		if goal.z != start.z then
 			return goal.z > start.z and PATH_SEGMENT_MOVETYPE_LADDERUP or PATH_SEGMENT_MOVETYPE_LADDERDOWN
 		end
@@ -815,9 +812,9 @@ local CAI_DynamicLink = {
 				link.dlink = self
 				
 				if self.m_LinkState==LINK_OFF then
-					link.m_info = bit.bor(link.m_info,bits_LINK_OFF)
+					link.m_info = bor(link.m_info, bits_LINK_OFF)
 				else
-					link.m_info = bit.band(link.m_info,bit.bnot(bits_LINK_OFF))
+					link.m_info = band(link.m_info, bnot(bits_LINK_OFF))
 				end
 			else
 				DevMsg("Dynamic Link Error: "..tostring(self.dlink).." unable to form between nodes "..self.m_SrcID.." and "..self.m_DestID.."\n")
@@ -865,7 +862,7 @@ local CAI_Hint = {
 	SetName = function(self, name) self.m_Name = name end,
 	GetName = function(self) return self.m_Name end,
 
-	AddSpawnFlags = function(self, flags) self.m_SpawnFlags = bit.bor(self.m_SpawnFlags, flags) end,
+	AddSpawnFlags = function(self, flags) self.m_SpawnFlags = bor(self.m_SpawnFlags, flags) end,
 	GetSpawnFlags = function(self) return self.m_SpawnFlags end,
 }
 
@@ -892,18 +889,18 @@ local SearchList = {
 	end,
 	
 	PopOpenList = function(self)
-		local node,cost
-		
-		for k,v in pairs(self.Opened) do
-			local c = self.TotalCost[k]
-			
-			if !cost or c<cost then
-				node,cost = k,c
+		local node, cost
+
+		for cnode, _ in pairs(self.Opened) do
+			local ccost = self.TotalCost[cnode]
+
+			if !cost or ccost < cost then
+				node, cost = cnode, ccost
 			end
 		end
-		
+
 		self.Opened[node] = nil
-		self.NumOpened = self.NumOpened-1
+		self.NumOpened = self.NumOpened - 1
 		
 		return node
 	end,
@@ -913,16 +910,16 @@ local SearchList = {
 	end,
 	
 	IsOpen = function(self,node)
-		return self.Opened[node]==true
+		return self.Opened[node] == true
 	end,
 	
 	AddToOpenList = function(self,node)
 		self.Opened[node] = true
-		self.NumOpened = self.NumOpened+1
+		self.NumOpened = self.NumOpened + 1
 	end,
 	
 	IsClosed = function(self,node)
-		return self.Closed[node]==true
+		return self.Closed[node] == true
 	end,
 	
 	SetCostSoFar = function(self,node,cost)
@@ -934,7 +931,7 @@ local SearchList = {
 	end,
 	
 	RemoveFromClosedList = function(self,node)
-		self.Closed[node] = nil
+		//self.Closed[node] = nil
 	end,
 }
 
@@ -965,14 +962,19 @@ local PathFollower = {
 	end,
 	
 	_Astar = function(self, start, goal, botdata)
-		local from = GetNearestNode(start, botdata.center)
-		local to = GetNearestNode(goal, goal + (botdata.center - botdata.pos))
+		local from, to
+
+		if sb_anb_nodegraph_getnearestnodevischeck:GetBool() then
+			from = GetNearestNode(start, botdata.center)
+			to = GetNearestNode(goal, goal + (botdata.center - botdata.pos))
+		else
+			from, to = GetNearestNode(start), GetNearestNode(goal)
+		end
 		
 		if !from or !to then return false end
 		
 		if from == to then
 			self:_ConstructTrivial(start, goal, from)
-			
 			return true
 		end
 		
@@ -982,10 +984,12 @@ local PathFollower = {
 		
 		local list = NewObject({__index = SearchList})
 		list:_initialize()
+
+		list:SetCostSoFar(from,0)
+		list:SetTotalCost(from,from.m_origin:Distance(to.m_origin))
 		
 		list:AddToOpenList(from)
-		list:SetCostSoFar(from,0)
-		list:SetTotalCost(from,from:GetOrigin():Distance(to:GetOrigin()))
+		list:AddToClosedList(from)
 		
 		while !list:IsOpenListEmpty() do
 			local node = list:PopOpenList()
@@ -994,12 +998,10 @@ local PathFollower = {
 				return self:_Construct(nodes, from, to, start, goal, botdata)
 			end
 			
-			list:AddToClosedList(node)
-			
-			for i=0,node:_NumLinks()-1 do
-				local link = node:_GetLink(i)
+			for i = 0, node.m_NumLinks - 1 do
+				local link = node.m_links[i]
 				
-				if bit.band(link.m_info,bits_LINK_OFF)!=0 then
+				if band(link.m_info,bits_LINK_OFF)!=0 then
 					local dlink = link.dlink
 					
 					if !dlink or !dlink:IsValid() or dlink:GetStrAllowUse()=="" then
@@ -1024,28 +1026,23 @@ local PathFollower = {
 				local curcap, duck = GetLinkCapabilities(link, node, neighbor, botdata)
 				if curcap == 0 then continue end
 				
-				local cost = PathCostGenerator(self, node, neighbor, curcap)
+				local cost = PathCostGenerator(self, node, neighbor, curcap, botdata)
 				if cost < 0 then continue end
 				
 				local newcost = list:GetCostSoFar(node) + cost
 				
 				if !list:IsClosed(neighbor) or newcost < list:GetCostSoFar(neighbor) then
 					list:SetCostSoFar(neighbor, newcost)
-					list:SetTotalCost(neighbor, newcost + neighbor:GetOrigin():Distance(to:GetOrigin()))
+					list:SetTotalCost(neighbor, newcost + neighbor.m_origin:Distance(to.m_origin))
 					
-					if !list:IsOpen(neighbor) then
-						list:AddToOpenList(neighbor)
-					end
-					
-					if list:IsClosed(neighbor) then
-						list:RemoveFromClosedList(neighbor)
-					end
+					if !list:IsOpen(neighbor) then list:AddToOpenList(neighbor) end
+					list:AddToClosedList(neighbor)
 					
 					nodes[neighbor] = node
 				end
 			end
 		end
-		
+
 		return false
 	end,
 	
@@ -1124,9 +1121,10 @@ local PathFollower = {
 			duckhull = bot:GetDuckHullType(),
 			mask = bot:GetSolidMask(),
 			step = bot.loco:GetStepHeight(),
+			jump = bot.loco:GetJumpHeight(),
+			deathdrop = bot.loco:GetDeathDropHeight(),
 			bounds = {Vector(bot.CollisionBounds[1]), Vector(bot.CollisionBounds[2])},
 			cbounds = {Vector(bot.CrouchCollisionBounds[1]), Vector(bot.CrouchCollisionBounds[2])},
-			deathdrop = bot.loco:GetDeathDropHeight(),
 			ladder = bot.m_Ladder,
 			filter = bot:GetChildren(),
 		}
@@ -1546,8 +1544,11 @@ local PathFollower = {
 					dir:Normalize()
 
 					bot:Approach(curpos + dir * 100)
+				elseif istable(result) then
+					bot:JumpToPos(result.pos, result.height)
 				else
-					// We failed to calc jump height, don't move to prevent stuck or something
+					// We failed to calc jump height, but we still need moving along path, jump as is
+					bot:JumpToPos(goalpos, bot.MaxJumpToPosHeight)
 				end
 			end
 		end
@@ -1843,7 +1844,7 @@ function Load()
 			continue
 		end
 		
-		if bit.band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)!=0 then
+		if band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)!=0 then
 			local link = dlink:FindLink()
 			
 			if !link then
@@ -1862,10 +1863,10 @@ function Load()
 			if link then
 				link.dlink = dlink
 			
-				local hullbits = bit.band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)
+				local hullbits = band(v:GetSpawnFlags(),bits_HULL_BITS_MASK)
 				
 				for i=0,NUM_HULLS-1 do
-					if bit.band(hullbits,bit.lshift(1,i))!=0 then
+					if band(hullbits,lshift(1,i))!=0 then
 						link.m_AcceptedMoveTypes[i] = dlink.m_LinkType
 					end
 				end
@@ -2037,24 +2038,24 @@ timer.Create("sb_anb_nodegraph_drawnodes",1,0,function()
 			
 			r,g,b = 255,0,0
 			
-			if bit.band(linkinfo,bits_LINK_STALE_SUGGESTED)!=0 then
+			if band(linkinfo,bits_LINK_STALE_SUGGESTED)!=0 then
 				r,g,b = 255,0,0
-			elseif bit.band(linkinfo,bits_LINK_OFF)!=0 then
+			elseif band(linkinfo,bits_LINK_OFF)!=0 then
 				r,g,b = 100,100,100
-			elseif bit.band(movetype,CAP_MOVE_FLY)!=0 then
+			elseif band(movetype,CAP_MOVE_FLY)!=0 then
 				r,g,b = 100,255,255
-			elseif bit.band(movetype,CAP_MOVE_CLIMB)!=0 then
+			elseif band(movetype,CAP_MOVE_CLIMB)!=0 then
 				r,g,b = 255,0,255
-			elseif bit.band(movetype,CAP_MOVE_GROUND)!=0 then
+			elseif band(movetype,CAP_MOVE_GROUND)!=0 then
 				r,g,b = 0,255,50
-			elseif bit.band(movetype,CAP_MOVE_JUMP)!=0 then
+			elseif band(movetype,CAP_MOVE_JUMP)!=0 then
 				r,g,b = 0,0,255
 			else
 				local fly = node:GetType()==NODE_AIR or dest:GetType()==NODE_AIR
 				local jump = true
 				
 				for k=HULL_HUMAN,NUM_HULLS-1 do
-					if bit.band(link.m_AcceptedMoveTypes[k],bit.bnot(CAP_MOVE_JUMP))!=0 then
+					if band(link.m_AcceptedMoveTypes[k],bnot(CAP_MOVE_JUMP))!=0 then
 						jump = false
 						break
 					end
@@ -2103,9 +2104,6 @@ hook.Add("Initialize", "sb_anb_nodegraph_hints", function()
 			if ent:GetInternalVariable("hinttype") != 0 || ent:GetInternalVariable("Group") != "" || ent:GetName() != "" then
 				hint = CreateHint(ent, HintNodeCount)
 				hint:AddSpawnFlags(ent:GetSpawnFlags())
-
-				print(ent)
-				PrintTable(ent:GetSaveTable(true))
 			end
 		end
 
