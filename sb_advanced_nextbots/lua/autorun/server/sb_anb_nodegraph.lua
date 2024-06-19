@@ -304,6 +304,7 @@ local sb_anb_nodegraph_drawnodes = CreateConVar("sb_anb_nodegraph_drawnodes","0"
 local sb_anb_nodegraph_drawnodes_hull = CreateConVar("sb_anb_nodegraph_drawnodes_hull","0", FCVAR_ARCHIVE)
 local sb_anb_nodegraph_pathdebug = CreateConVar("sb_anb_nodegraph_pathdebug","0", FCVAR_ARCHIVE)
 local sb_anb_nodegraph_accurategetnearestnode = CreateConVar("sb_anb_nodegraph_accurategetnearestnode","1", FCVAR_ARCHIVE)
+local sb_anb_nodegraph_getnearestnodevischeck = CreateConVar("sb_anb_nodegraph_getnearestnodevischeck","0", FCVAR_ARCHIVE)
 local sb_anb_nodegraph_trivialcheck = CreateConVar("sb_anb_nodegraph_trivialcheck","1", FCVAR_ARCHIVE)
 local sb_anb_nodegraph_trivialcheck_debug = CreateConVar("sb_anb_nodegraph_trivialcheck_debug","0", FCVAR_ARCHIVE)
 
@@ -961,14 +962,19 @@ local PathFollower = {
 	end,
 	
 	_Astar = function(self, start, goal, botdata)
-		local from = GetNearestNode(start, botdata.center)
-		local to = GetNearestNode(goal, goal + (botdata.center - botdata.pos))
+		local from, to
+
+		if sb_anb_nodegraph_getnearestnodevischeck:GetBool() then
+			from = GetNearestNode(start, botdata.center)
+			to = GetNearestNode(goal, goal + (botdata.center - botdata.pos))
+		else
+			from, to = GetNearestNode(start), GetNearestNode(goal)
+		end
 		
 		if !from or !to then return false end
 		
 		if from == to then
 			self:_ConstructTrivial(start, goal, from)
-			
 			return true
 		end
 		
@@ -1036,7 +1042,7 @@ local PathFollower = {
 				end
 			end
 		end
-		
+
 		return false
 	end,
 	

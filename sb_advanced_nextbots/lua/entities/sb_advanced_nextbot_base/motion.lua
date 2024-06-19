@@ -866,11 +866,9 @@ function ENT:ComputePath(pos,generator)
 		local ang = self:GetAngles()
 		path:Update(self)
 		self:SetAngles(ang)
-		
-		return path:IsValid()
 	end
 	
-	return false
+	return path:IsValid()
 end
 
 --[[------------------------------------
