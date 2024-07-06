@@ -99,7 +99,11 @@ end
 	Ret1: bool | Return true to disable.
 --]]------------------------------------
 function ENT:DisableBehaviour()
-	return self:IsPostureActive() or self:IsGestureActive(true) or GetConVar("ai_disabled"):GetBool() and !self:IsControlledByPlayer() or self:RunTask("DisableBehaviour")
+	if self:IsPostureActive() or self.m_DoPosture or self:IsGestureActive(true) or self.m_DoGesture and self.m_DoGesture[3] then
+		return true
+	end
+
+	return GetConVar("ai_disabled"):GetBool() and !self:IsControlledByPlayer() or self:RunTask("DisableBehaviour")
 end
 
 --[[------------------------------------

@@ -140,7 +140,7 @@ end
 	Desc: Updates bot's memory of this enemy.
 	Arg1: Entity | enemy | Enemy to update.
 	Arg2: Vector | pos | Position where bot see enemy.
-	Arg3: (optional) bool | visible | Is bot see enemy or not, default is false.
+	Arg3: (optional) bool | visible | Is bot see enemy or not, default is NEXTBOT:CanSeePosition(enemy).
 	Ret1: 
 --]]------------------------------------
 function ENT:UpdateEnemyMemory(enemy, pos, visible)
@@ -148,6 +148,10 @@ function ENT:UpdateEnemyMemory(enemy, pos, visible)
 	if !memory then
 		memory = {}
 		self.m_EnemiesMemory[enemy] = memory
+	end
+
+	if visible == nil then
+		visible = self:CanSeePosition(enemy)
 	end
 
 	memory.lastupdate = CurTime()
