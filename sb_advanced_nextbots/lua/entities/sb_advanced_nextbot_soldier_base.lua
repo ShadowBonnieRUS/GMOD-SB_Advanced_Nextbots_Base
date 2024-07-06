@@ -152,7 +152,7 @@ ENT.TaskList = {
 					
 					if self:CanSeePosition(newenemy) then
 						self.LastEnemyShootPos = self:EntShootPos(newenemy)
-						self:UpdateEnemyMemory(newenemy,newenemy:GetPos())
+						self:UpdateEnemyMemory(newenemy,newenemy:GetPos(), true)
 					end
 				else
 					if data.HasEnemy then
